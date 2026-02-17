@@ -16,7 +16,8 @@ type PVCMetric struct {
 	// Storage characteristics
 	StorageClass string `json:"storage_class"`
 	SizeBytes    int64  `json:"size_bytes"`
-	UsedBytes    int64  `json:"used_bytes"` // Actual usage (requires metrics-server)
+	UsedBytes    int64  `json:"used_bytes"`   // Actual usage (requires metrics-server)
+	EgressBytes  uint64 `json:"egress_bytes"` // Network traffic (requires eBPF)
 
 	// Performance metrics (future - requires Prometheus or cloud APIs)
 	ReadIOPS        float64 `json:"read_iops"`

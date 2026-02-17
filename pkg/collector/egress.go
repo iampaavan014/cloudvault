@@ -44,6 +44,7 @@ func CorrelateEgress(metrics []types.PVCMetric, egressData map[string]uint64) {
 		// we assign that traffic to the PVC used by that pod.
 		// (Simplified for Phase 6)
 		if val, ok := egressData[metrics[i].Namespace]; ok {
+			metrics[i].EgressBytes = val
 			metrics[i].Labels["cloudvault.io/egress-bytes"] = fmt.Sprintf("%d", val)
 		}
 	}

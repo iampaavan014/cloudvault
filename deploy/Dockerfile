@@ -28,7 +28,7 @@ COPY --from=web-builder /app/dist pkg/dashboard/dist
 # However, if we link against libbpf, we need CGO.
 # Given our current eBPF implemention uses cilium/ebpf/link, it might rely on kernel headers.
 # Let's try static build first.
-ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=arm64
 
 # Build
 RUN go build -ldflags="-w -s" -o bin/cloudvault cmd/cli/main.go

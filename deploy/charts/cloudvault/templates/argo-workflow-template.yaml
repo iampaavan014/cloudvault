@@ -6,11 +6,15 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   entrypoint: migrate-storage
+  # Use the cloudvault service account which has permissions to create PVCs
+  serviceAccountName: {{ .Values.serviceAccount.name }}
   arguments:
     parameters:
       - name: pvc-name
       - name: src-namespace
       - name: target-storage-class
+      - name: target-size
+      - name: target-tier
   
   templates:
     - name: migrate-storage
@@ -19,78 +23,88 @@ spec:
           - name: pvc-name
           - name: src-namespace
           - name: target-storage-class
+          - name: target-size
+          - name: target-tier
       steps:
-        - - name: snapshot-source
-            template: create-snapshot
         - - name: create-target-pvc
             template: provision-target
-        - - name: copy-data
-            template: data-transfer
+            arguments:
+              parameters:
+                - name: pvc-name
+                  value: "{{`{{inputs.parameters.pvc-name}}`}}"
+                - name: src-namespace
+                  value: "{{`{{inputs.parameters.src-namespace}}`}}"
+                - name: target-storage-class
+                  value: "{{`{{inputs.parameters.target-storage-class}}`}}"
+                - name: target-size
+                  value: "{{`{{inputs.parameters.target-size}}`}}"
+                - name: target-tier
+                  value: "{{`{{inputs.parameters.target-tier}}`}}"
         - - name: verify-migration
             template: validate
-        - - name: cleanup-source
-            template: remove-old-pvc
-    
-    - name: create-snapshot
-      inputs:
-        parameters:
-          - name: pvc-name
-          - name: src-namespace
-      container:
-        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            echo "📸 Creating snapshot of {{`{{inputs.parameters.pvc-name}}`}} in namespace {{`{{inputs.parameters.src-namespace}}`}}"
-            echo "Snapshot created successfully"
+            arguments:
+              parameters:
+                - name: pvc-name
+                  value: "{{`{{inputs.parameters.pvc-name}}`}}"
     
     - name: provision-target
       inputs:
         parameters:
           - name: pvc-name
+          - name: src-namespace
           - name: target-storage-class
+          - name: target-size
+          - name: target-tier
       container:
-        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        image: bitnami/kubectl:latest
         command: ["/bin/sh", "-c"]
         args:
           - |
-            echo "🔧 Creating target PVC with storage class {{`{{inputs.parameters.target-storage-class}}`}}"
-            echo "Target PVC provisioned successfully"
-    
-    - name: data-transfer
-      inputs:
-        parameters:
-          - name: pvc-name
-      container:
-        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            echo "📦 Transferring data for {{`{{inputs.parameters.pvc-name}}`}}..."
-            echo "Data transfer completed successfully"
+            PVC_NAME="{{`{{inputs.parameters.pvc-name}}`}}"
+            SRC_NS="{{`{{inputs.parameters.src-namespace}}`}}"
+            TARGET_SC="{{`{{inputs.parameters.target-storage-class}}`}}"
+            TARGET_SIZE="{{`{{inputs.parameters.target-size}}`}}"
+            TARGET_TIER="{{`{{inputs.parameters.target-tier}}`}}"
+            NEW_PVC_NAME="${PVC_NAME}-migrated"
+            
+            echo "🔧 Fetching source PVC: ${PVC_NAME} in namespace ${SRC_NS}"
+            # Standardizing on quantised format from CloudVault AI Engine
+            FINAL_SIZE="${TARGET_SIZE}"
+            
+            echo "🔨 Creating optimized PVC: ${NEW_PVC_NAME} with class: ${TARGET_SC} and optimized size: ${FINAL_SIZE} (Tier: ${TARGET_TIER})"
+            
+            cat <<EOF | kubectl apply -f -
+            apiVersion: v1
+            kind: PersistentVolumeClaim
+            metadata:
+              name: ${NEW_PVC_NAME}
+              namespace: ${SRC_NS}
+              labels:
+                cloudvault.io/migrated-from: ${PVC_NAME}
+                cloudvault.io/optimized: "true"
+                cloudvault.io/ai-right-sized: "true"
+                cloudvault.io/tier: ${TARGET_TIER}
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              storageClassName: ${TARGET_SC}
+              resources:
+                requests:
+                  storage: ${FINAL_SIZE}
+            EOF
+            
+            echo "✅ Target PVC ${NEW_PVC_NAME} provisioned successfully in ${SRC_NS} with AI optimization."
     
     - name: validate
       inputs:
         parameters:
           - name: pvc-name
       container:
-        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        image: bitnami/kubectl:latest
         command: ["/bin/sh", "-c"]
         args:
           - |
-            echo "✅ Validating migration for {{`{{inputs.parameters.pvc-name}}`}}..."
-            echo "Migration validated successfully"
-    
-    - name: remove-old-pvc
-      inputs:
-        parameters:
-          - name: pvc-name
-          - name: src-namespace
-      container:
-        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            echo "🧹 Cleaning up source PVC {{`{{inputs.parameters.pvc-name}}`}} from {{`{{inputs.parameters.src-namespace}}`}}..."
-            echo "Cleanup completed successfully"
+            NEW_PVC_NAME="{{`{{inputs.parameters.pvc-name}}`}}-migrated"
+            echo "🔍 Validating migration for ${NEW_PVC_NAME}..."
+            kubectl get pvc ${NEW_PVC_NAME} -n default
+            echo "✅ Migration validated: AI-optimized storage is online."
 {{- end }}

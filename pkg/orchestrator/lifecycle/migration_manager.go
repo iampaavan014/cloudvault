@@ -11,24 +11,22 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// MigrationManager defines the interface for executing storage migrations
+// MigrationManager handles the execution of storage migrations
 type MigrationManager interface {
-	TriggerMigration(ctx context.Context, pvc types.PVCMetric, targetClass string) (string, error)
+	TriggerMigration(ctx context.Context, pvc types.PVCMetric, targetClass string, targetSize string) (string, error)
 }
 
-// ArgoMigrationManager handles submission of Argo workflows
+// ArgoMigrationManager leverages Argo Workflows for migration orchestration
 type ArgoMigrationManager struct {
 	dynamicClient dynamic.Interface
 }
 
-func NewArgoMigrationManager(client dynamic.Interface) *ArgoMigrationManager {
-	return &ArgoMigrationManager{
-		dynamicClient: client,
-	}
+func NewArgoMigrationManager(dynamicClient dynamic.Interface) *ArgoMigrationManager {
+	return &ArgoMigrationManager{dynamicClient: dynamicClient}
 }
 
 // TriggerMigration submits an Argo Workflow to move a PVC between clusters
-func (m *ArgoMigrationManager) TriggerMigration(ctx context.Context, pvc types.PVCMetric, targetClass string) (string, error) {
+func (m *ArgoMigrationManager) TriggerMigration(ctx context.Context, pvc types.PVCMetric, targetClass string, targetSize string) (string, error) {
 	workflowGVR := schema.GroupVersionResource{
 		Group:    "argoproj.io",
 		Version:  "v1alpha1",
@@ -52,6 +50,8 @@ func (m *ArgoMigrationManager) TriggerMigration(ctx context.Context, pvc types.P
 						map[string]interface{}{"name": "pvc-name", "value": pvc.Name},
 						map[string]interface{}{"name": "src-namespace", "value": pvc.Namespace},
 						map[string]interface{}{"name": "target-storage-class", "value": targetClass},
+						map[string]interface{}{"name": "target-size", "value": targetSize},
+						map[string]interface{}{"name": "target-tier", "value": pvc.Labels["cloudvault.io/tier"]},
 					},
 				},
 			},

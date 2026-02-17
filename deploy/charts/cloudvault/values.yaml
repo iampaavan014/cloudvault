@@ -1,9 +1,9 @@
 # Default values for cloudvault.
 
 image:
-  repository: ghcr.io/iampaavan014/cloudvault
+  repository: cloudvault/agent
   tag: latest
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
 
 serviceAccount:
   create: true
@@ -46,7 +46,7 @@ policies:
     tiers:
       - name: warm
         storageClass: sc1
-        duration: 1h
+        duration: 1m
 
 # Argo Workflows Integration (optional dependency)
 argo:

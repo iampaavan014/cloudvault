@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -11,16 +12,18 @@ import (
 
 // LifecycleController manages autonomous storage tiering
 type LifecycleController struct {
-	engine   *PolicyEngine
-	manager  MigrationManager
-	interval time.Duration
+	engine      *PolicyEngine
+	recommender *IntelligentRecommender
+	manager     MigrationManager
+	interval    time.Duration
 }
 
 // NewLifecycleController creates a new autonomous controller
 func NewLifecycleController(interval time.Duration, manager MigrationManager) *LifecycleController {
 	return &LifecycleController{
-		manager:  manager,
-		interval: interval,
+		manager:     manager,
+		recommender: NewIntelligentRecommender(),
+		interval:    interval,
 	}
 }
 
@@ -58,6 +61,18 @@ func (c *LifecycleController) reconcile(metrics []types.PVCMetric) {
 			continue
 		}
 
+		// 1. Check for AI Intelligence (Right-sizing/Placement)
+		recommendation := c.recommender.Recommend(pvc, policy)
+		if recommendation != nil {
+			slog.Info("🧠 AI RECOMMENDATION IDENTIFIED",
+				"pvc", pvc.Name,
+				"reason", recommendation.Reason,
+				"target_size", recommendation.TargetSize)
+			c.executeTransition(pvc, policy, recommendation)
+			continue
+		}
+
+		// 2. Fallback to Rule-based Tiering
 		targetTier, err := c.engine.Evaluate(pvc, policy)
 		if err != nil {
 			slog.Error("Policy evaluation failed", "pvc", pvc.Name, "policy", policy.Name, "error", err)
@@ -65,26 +80,32 @@ func (c *LifecycleController) reconcile(metrics []types.PVCMetric) {
 		}
 
 		if targetTier != nil {
-			c.executeTransition(pvc, policy, targetTier)
+			c.executeTransition(pvc, policy, &OptimizationRecommendation{
+				TargetClass: targetTier.StorageClass,
+				TargetSize:  FormatQuantity(pvc.SizeBytes),
+				TargetTier:  "warm",
+				Reason:      fmt.Sprintf("Rule-based Tiering: Policy %s triggered duration threshold", policy.Name),
+			})
 		}
 	}
 }
 
-func (c *LifecycleController) executeTransition(pvc types.PVCMetric, policy *v1alpha1.StorageLifecyclePolicy, tier *v1alpha1.StorageTier) {
+func (c *LifecycleController) executeTransition(pvc types.PVCMetric, policy *v1alpha1.StorageLifecyclePolicy, rec *OptimizationRecommendation) {
 	slog.Info("⚠️ AUTONOMOUS ACTION REQUIRED",
 		"pvc", pvc.Name,
 		"namespace", pvc.Namespace,
 		"current_class", pvc.StorageClass,
-		"target_tier", tier.Name,
-		"target_class", tier.StorageClass,
-		"policy", policy.Name)
-
-	// In Phase 4, we simulate the action or log it as a "Triggered" state.
-	// Actual migration logic (MCE/ASO) will be integrated here in the final stage.
+		"target_class", rec.TargetClass,
+		"target_size", rec.TargetSize,
+		"reason", rec.Reason)
 
 	if c.manager != nil {
-		slog.Info("🚀 TRIGGERING REAL MIGRATION", "pvc", pvc.Name, "target", tier.StorageClass)
-		workflowName, err := c.manager.TriggerMigration(context.Background(), pvc, tier.StorageClass)
+		slog.Info("🚀 TRIGGERING INTELLIGENT MIGRATION",
+			"pvc", pvc.Name,
+			"target", rec.TargetClass,
+			"size", rec.TargetSize)
+
+		workflowName, err := c.manager.TriggerMigration(context.Background(), pvc, rec.TargetClass, rec.TargetSize)
 		if err != nil {
 			slog.Error("Failed to trigger migration", "pvc", pvc.Name, "error", err)
 		} else {
