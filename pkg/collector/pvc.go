@@ -12,6 +12,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Collector defines the interface for fetching PVC metrics
+type Collector interface {
+	CollectAll(ctx context.Context) ([]types.PVCMetric, error)
+	CollectByNamespace(ctx context.Context, namespace string) ([]types.PVCMetric, error)
+}
+
 // PVCCollector handles the collection of PersistentVolumeClaim metrics from a Kubernetes cluster.
 // It supports both full cluster collection and namespace-scoped collection.
 type PVCCollector struct {

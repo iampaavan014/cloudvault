@@ -9,7 +9,7 @@ func TestNewAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create agent: %v", err)
 	}
-	defer agent.Close()
+	defer func() { _ = agent.Close() }()
 
 	if agent == nil {
 		t.Fatal("Agent is nil")

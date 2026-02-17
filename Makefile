@@ -111,11 +111,8 @@ fmt:
 lint:
 	@echo "🔍 Running linters..."
 	@command -v $(GOLINT) >/dev/null 2>&1 || { \
-		echo "⚠️  golangci-lint not found. Install with:"; \
-		echo "    brew install golangci-lint"; \
-		echo "    OR"; \
-		echo "    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
-		exit 1; \
+		echo "📦 golangci-lint not found. Installing..."; \
+		$(MAKE) dev-deps; \
 	}
 	$(GOLINT) run ./...
 	@echo "✅ Linting complete"

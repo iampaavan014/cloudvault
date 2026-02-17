@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"math/rand"
 	"testing"
 )
 
@@ -36,11 +35,12 @@ func TestAIVerificationSuite(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			class := agent.DecidePlacement(workload, classes)
 			var reward float64
-			if class == "sc1" {
+			switch class {
+			case "sc1":
 				reward = 10.0 // High reward for sc1
-			} else if class == "io1" {
+			case "io1":
 				reward = -10.0 // Penalty for expensive io1
-			} else {
+			default:
 				reward = 0.0
 			}
 			agent.Reward(workload, class, reward)
@@ -57,6 +57,11 @@ func TestAIVerificationSuite(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	rand.Seed(42) // Deterministic for verification
+	// rand.Seed is deprecated since Go 1.20. For deterministic testing,
+	// we use a local random source in the agent if needed, but for global
+	// rand usage in legacy components, we can still use Seed if necessary
+	// or just rely on the new default behavior.
+	// For this test, we'll use a local source where applicable, but to fix
+	// the lint error we'll remove the global seed.
 	m.Run()
 }

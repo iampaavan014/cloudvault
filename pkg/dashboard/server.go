@@ -43,17 +43,21 @@ type Server struct {
 	orchestrator *lifecycle.LifecycleController
 	governance   *governance.AdmissionController
 	provider     string // Cloud provider (aws, gcp, azure)
+	mock         bool
 	store        *MetricsStore
 }
 
 // NewServer creates a new dashboard server
-func NewServer(client *collector.KubernetesClient, promClient *integrations.PrometheusClient, provider string) *Server {
+func NewServer(client *collector.KubernetesClient, promClient *integrations.PrometheusClient, provider string, mock bool) *Server {
+	// Initialize intelligence layer for dashboard visibility
+	recommender := lifecycle.NewIntelligentRecommender(nil) // Dashboard usually read-only for metrics
 	return &Server{
 		client:       client,
 		promClient:   promClient,
-		orchestrator: lifecycle.NewLifecycleController(60*time.Second, nil),
+		orchestrator: lifecycle.NewLifecycleController(60*time.Second, nil, recommender),
 		governance:   governance.NewAdmissionController(),
 		provider:     provider,
+		mock:         mock,
 		store:        &MetricsStore{},
 	}
 }
@@ -149,7 +153,12 @@ func (s *Server) reconcile() {
 	var metrics []types.PVCMetric
 	var err error
 
-	pvcCollector := collector.NewPVCCollector(s.client, s.promClient)
+	var pvcCollector collector.Collector
+	if s.mock {
+		pvcCollector = collector.NewMockPVCCollector()
+	} else {
+		pvcCollector = collector.NewPVCCollector(s.client, s.promClient)
+	}
 	metrics, err = pvcCollector.CollectAll(ctx)
 
 	duration := time.Since(start)

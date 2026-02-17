@@ -75,6 +75,11 @@ func (o *Optimizer) GenerateRecommendations(metrics []types.PVCMetric, provider 
 				Impact:           "low",
 			})
 		}
+
+		// Phase 22 MCE Intelligence: Check for cross-cloud savings
+		if rec := o.checkCrossCloudMigration(&metrics[i]); rec != nil {
+			recommendations = append(recommendations, *rec)
+		}
 	}
 
 	// Sort by savings

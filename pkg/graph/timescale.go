@@ -57,7 +57,7 @@ func (t *TimescaleDB) RecordMetrics(ctx context.Context, metrics []types.PVCMetr
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO pvc_metrics (time, pvc_name, namespace, used_bytes, egress_bytes, iops, monthly_cost)
@@ -66,7 +66,7 @@ func (t *TimescaleDB) RecordMetrics(ctx context.Context, metrics []types.PVCMetr
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	now := time.Now()
 	for _, m := range metrics {
@@ -97,7 +97,7 @@ func (t *TimescaleDB) GetHistory(ctx context.Context, namespace, name string, du
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var history []float64
 	for rows.Next() {

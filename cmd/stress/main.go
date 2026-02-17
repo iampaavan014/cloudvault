@@ -25,10 +25,10 @@ func main() {
 
 	switch os.Args[1] {
 	case "generate":
-		generateCmd.Parse(os.Args[2:])
+		_ = generateCmd.Parse(os.Args[2:])
 		generate(*count, *start)
 	case "monitor":
-		monitorCmd.Parse(os.Args[2:])
+		_ = monitorCmd.Parse(os.Args[2:])
 		monitor(*url)
 	default:
 		fmt.Println("expected 'generate' or 'monitor' subcommands")
@@ -97,8 +97,8 @@ func monitor(url string) {
 			fmt.Printf("❌ Error: %v\n", err)
 		} else {
 			var result []interface{}
-			json.NewDecoder(resp.Body).Decode(&result)
-			resp.Body.Close()
+			_ = json.NewDecoder(resp.Body).Decode(&result)
+			_ = resp.Body.Close()
 			fmt.Printf("✅ Count: %d | Latency: %v\n", len(result), duration)
 		}
 

@@ -31,7 +31,7 @@ func (s *SlackNotifier) SendAlert(title, message string) error {
 	if err != nil {
 		return fmt.Errorf("slack notification failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("slack returned non-200 status: %d", resp.StatusCode)

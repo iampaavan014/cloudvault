@@ -62,7 +62,7 @@ func (ac *AdmissionController) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	respBytes, _ := json.Marshal(review)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(respBytes)
+	_, _ = w.Write(respBytes)
 }
 
 func (ac *AdmissionController) validate(req *admissionv1.AdmissionRequest) *admissionv1.AdmissionResponse {

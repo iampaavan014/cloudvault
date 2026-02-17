@@ -20,6 +20,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Run fmt check
+        run: |
+          go fmt ./...
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Error: Code is not formatted. Run 'make fmt' locally."
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Run lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Run unit tests
+        run: make unittest
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 

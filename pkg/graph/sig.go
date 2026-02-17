@@ -25,7 +25,7 @@ func NewSIG(uri, username, password string) (*SIG, error) {
 // SyncPVCs creates or updates multiple PVC nodes and their relationships (Phase 9 optimization)
 func (s *SIG) SyncPVCs(ctx context.Context, metrics []types.PVCMetric) error {
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	defer func() { _ = session.Close(ctx) }()
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		query := `
@@ -68,7 +68,7 @@ func (s *SIG) SyncPVC(ctx context.Context, namespace, name, storageClass string,
 // MapPodToPVC creates a connection between a Pod and its used PVC
 func (s *SIG) MapPodToPVC(ctx context.Context, podName, namespace, pvcName string) error {
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	defer func() { _ = session.Close(ctx) }()
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		query := `
@@ -93,7 +93,7 @@ func (s *SIG) MapPodToPVC(ctx context.Context, podName, namespace, pvcName strin
 // GetCrossRegionGravity finds PVCs whose Pods are in a different region than the Storage
 func (s *SIG) GetCrossRegionGravity(ctx context.Context) ([]string, error) {
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
+	defer func() { _ = session.Close(ctx) }()
 
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		query := `

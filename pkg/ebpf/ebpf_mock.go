@@ -26,24 +26,3 @@ func (a *Agent) GetEgressStats() (map[string]uint64, error) {
 func (a *Agent) AttachToInterface(ifaceName string) (interface{}, error) {
 	return nil, errors.New("eBPF not supported on this platform")
 }
-
-// Dummy types to satisfy Linux build components if they are not guarded
-type egressObjects struct {
-	EgressMap interface {
-		Iterate() interface {
-			Next(interface{}, interface{}) bool
-			Err() error
-		}
-		Close() error
-	}
-}
-
-func (o *egressObjects) Close() error { return nil }
-
-type egressEgressStats struct {
-	Bytes uint64
-}
-
-func loadEgressObjects(obj interface{}, opts interface{}) error {
-	return nil
-}

@@ -64,12 +64,13 @@ func main() {
 		kubeconfig := dashCmd.String("kubeconfig", "", "Path to kubeconfig file")
 		promURL := dashCmd.String("prometheus", "", "Prometheus URL (e.g., http://localhost:9090)")
 		port := dashCmd.Int("port", 8080, "Port to run the dashboard on")
+		mock := dashCmd.Bool("mock", false, "Run in mock mode with synthetic data")
 
 		if err := dashCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Println("Error parsing flags:", err)
 			os.Exit(1)
 		}
-		handleDashboardCommand(*kubeconfig, *promURL, *port)
+		handleDashboardCommand(*kubeconfig, *promURL, *port, *mock)
 
 	case "version":
 		handleVersionCommand()
@@ -430,7 +431,7 @@ func displayRecommendation(num int, rec types.Recommendation) {
 	fmt.Println()
 }
 
-func handleDashboardCommand(kubeconfig string, promURL string, port int) {
+func handleDashboardCommand(kubeconfig string, promURL string, port int, mock bool) {
 	ctx := context.Background()
 
 	var clusterInfo *types.ClusterInfo
@@ -448,28 +449,33 @@ func handleDashboardCommand(kubeconfig string, promURL string, port int) {
 		}
 	}
 
-	// Real client
-	client, err = collector.NewKubernetesClient(kubeconfig)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error creating Kubernetes client: %v\n", err)
-		os.Exit(1)
-	}
+	provider := "aws" // Default
+	if !mock {
+		// Real client
+		client, err = collector.NewKubernetesClient(kubeconfig)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error creating Kubernetes client: %v\n", err)
+			os.Exit(1)
+		}
 
-	// Get cluster info to determine provider
-	clusterInfo, err = client.GetClusterInfo(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error getting cluster info: %v\n", err)
-		os.Exit(1)
+		// Get cluster info to determine provider
+		clusterInfo, err = client.GetClusterInfo(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error getting cluster info: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("🔌 Connected to %s (%s)\n", clusterInfo.Name, clusterInfo.Provider)
+		provider = clusterInfo.Provider
+	} else {
+		fmt.Println("🧪 Running in MOCK mode")
 	}
-	fmt.Printf("🔌 Connected to %s (%s)\n", clusterInfo.Name, clusterInfo.Provider)
 
 	// Start Server
-	provider := clusterInfo.Provider
 	if provider == "" {
 		provider = "aws" // Default fallback
 	}
 
-	server := dashboard.NewServer(client, promClient, provider)
+	server := dashboard.NewServer(client, promClient, provider, mock)
 	if err := server.Start(port); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Dashboard server error: %v\n", err)
 		os.Exit(1)
