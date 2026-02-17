@@ -32,13 +32,14 @@ CloudVault consists of three main pillars:
 CloudVault is designed for professional Kubernetes operations. The recommended deployment method is via our unified Helm chart, which automatically manages CRDs, RBAC, and all control plane components.
 
 ### One-Command Installation
-Deploy the entire stack (Dashboard, Agent, and Policies) with a single command:
+Deploy the entire stack (Dashboard, Agent, and Policies) with a single command. The images are automatically pulled from the **GitHub Container Registry (GHCR)**.
 
 ```bash
 helm upgrade --install cloudvault ./deploy/charts/cloudvault -n cloudvault --create-namespace
 ```
 
 ### What's Included:
+*   **Automated Image Delivery**: Pulls production-ready images from `ghcr.io/iampaavan014/cloudvault` (Built automatically via GitHub Actions).
 *   **Automatic CRD Management**: Installs `CostPolicy`, `StorageLifecyclePolicy`, and `Argo Workflows` CRDs.
 *   **CloudVault Control Plane**: Deploys the Dashboard (React UI + Golang API) and centralized orchestrator.
 *   **CloudVault Agent**: Deploys our lightweight, eBPF-enabled daemonset for cluster-wide metrics collection.
