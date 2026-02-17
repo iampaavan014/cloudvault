@@ -1,0 +1,22 @@
+{{- if .Values.policies.enabled }}
+apiVersion: cloudvault.io/v1alpha1
+kind: CostPolicy
+metadata:
+  name: global-budget
+spec:
+  budget: {{ .Values.policies.budget.amount }}
+  selector:
+    namespaces: {{ .Values.policies.budget.namespaces | toJson }}
+  alertThreshold: {{ .Values.policies.budget.alertThreshold }}
+  action: {{ .Values.policies.budget.action | quote }}
+---
+apiVersion: cloudvault.io/v1alpha1
+kind: StorageLifecyclePolicy
+metadata:
+  name: default-governance
+spec:
+  selector:
+    matchNamespaces: {{ .Values.policies.lifecycle.namespaces | toJson }}
+  tiers:
+    {{- toYaml .Values.policies.lifecycle.tiers | nindent 4 }}
+{{- end }}

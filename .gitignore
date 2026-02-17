@@ -18,10 +18,10 @@
 go.work
 
 # Binaries
-bin/
-cloudvault
-cloudvault-agent
-main
+/bin/
+/cloudvault
+/cloudvault-agent
+/main
 
 # IDEs
 .idea/

@@ -1,0 +1,8 @@
+apiVersion: v2
+name: cloudvault
+description: Multi-Cloud Kubernetes Storage Cost Intelligence
+type: application
+version: 0.1.0-alpha
+appVersion: "0.1.0-alpha"
+maintainers:
+  - name: CloudVault
