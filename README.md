@@ -19,29 +19,48 @@ CloudVault is an open-source platform designed to solve the #1 pain point in mod
 
 ## 🏗️ Architecture
 
-CloudVault consists of two main components:
+CloudVault consists of three main pillars:
 
-1.  **CloudVault Agent**: a lightweight pod running in your cluster that collects PVC metrics (metadata, usage, cost) and pushes them to the control plane (or stores locally for CLI access in standalone mode).
-2.  **CloudVault CLI**: A user-friendly command-line interface to query costs, view reports, and generate optimization recommendations.
+1.  **CloudVault Control Plane**: A centralized API and Dashboard that manages policies, aggregates data, and provides the user interface.
+2.  **CloudVault Agent**: A lightweight DaemonSet running on every node that collects real-time metrics and executes autonomous actions.
+3.  **Governance Layer**: A Validating Admission Controller that enforces budget policies at the source (API Server).
 
 ---
 
-## 🛠️ Installation
+## ☸️ Production Deployment (Helm)
+
+CloudVault is designed for professional Kubernetes operations. The recommended deployment method is via our unified Helm chart, which automatically manages CRDs, RBAC, and all control plane components.
+
+### One-Command Installation
+Deploy the entire stack (Dashboard, Agent, and Policies) with a single command:
+
+```bash
+helm upgrade --install cloudvault ./deploy/charts/cloudvault -n cloudvault --create-namespace
+```
+
+### What's Included:
+*   **Automatic CRD Management**: Installs `CostPolicy`, `StorageLifecyclePolicy`, and `Argo Workflows` CRDs.
+*   **CloudVault Control Plane**: Deploys the Dashboard (React UI + Golang API) and centralized orchestrator.
+*   **CloudVault Agent**: Deploys our lightweight, eBPF-enabled daemonset for cluster-wide metrics collection.
+*   **Default Governance**: Bootstraps the cluster with production-grade budget and lifecycle policies.
 
 ### Prerequisites
-*   Go 1.22+
-*   Node.js 18+ (for Web UI build)
-*   Kubernetes Cluster (Simulated or Real)
-*   Prometheus (Optional, for real-time usage metrics)
+*   Kubernetes 1.25+
+*   Helm 3.x
+*   (Optional) Prometheus/Grafana for extended metrics visualization.
 
-### Build from Source
+---
+
+## 🛠️ Advanced Build (Development)
+
+To contribute to CloudVault or build individual binaries:
 
 ```bash
 # Clone the repository
-git clone https://github.com/cloudvault-io/cloudvault.git
+git clone https://github.com/iampaavan014/cloudvault.git
 cd cloudvault
 
-# Build binaries (includes Web UI)
+# Build binaries (Agent, CLI, and Web Dashboard)
 make build
 ```
 
@@ -49,87 +68,40 @@ make build
 
 ## 📖 Usage
 
-### 1. View Cost Summary
+### 1. View Cost Summary (CLI)
 
-Get a quick overview of your storage spend.
-
-```bash
-./bin/cloudvault cost
-```
-
-**Output:**
-```
-💰 Total Monthly Cost: $53.50/month ($642.00/year)
-
-📊 Cost by Namespace:
-NAMESPACE    MONTHLY   ANNUAL    % OF TOTAL
-production   $35.00    $420.00   65.4%
-staging      $10.50    $126.00   19.6%
-dev          $8.00     $96.00    15.0%
-```
-
-### 2. Generate Recommendations
-
-Find ways to save money immediately.
+Get a quick overview of your storage spend via the agent CLI.
 
 ```bash
-./bin/cloudvault recommendations
+./bin/cloudvault-agent cost
 ```
 
-**Output:**
-```
-💡 Found 3 optimization opportunities
+### 2. Interactive Web Dashboard
 
-💰 Total Potential Savings: $25.50/month ($306.00/year)
-
-🗑️ 1. Volume has not been accessed in 45 days. Consider backing up and deleting.
-   PVC: dev/old-logs-archive
-   Savings: $5.00/month | 🟢 Low impact
-
-📏 2. Volume is only 5.0% utilized. Consider resizing to 15GB.
-   PVC: production/postgres-backup
-   Current: 200GB → Recommended: 15GB
-   Savings: $18.50/month | 🟡 Medium impact
-```
-
-### 3. Prometheus Integration (Real-time Data)
-
-Connect to your Prometheus server to get accurate usage-based recommendations (e.g., real "Zombie" detection based on I/O).
+Access the professional multi-view dashboard to visualize costs, recommendations, and real-time analytics.
 
 ```bash
-./bin/cloudvault recommendations --prometheus http://localhost:9090
-```
-
-### 4. Interactive Web Dashboard
-
-Launch the professional multi-view dashboard to visualize costs, recommendations, and real-time analytics.
-
-```bash
-# Launch dashboard (default port 8080)
-./bin/cloudvault dashboard --kubeconfig ~/.kube/config
-
-# Launch with Mock Data (for demo purposes)
-./bin/cloudvault dashboard --mock
+# Access via Port Forward
+kubectl port-forward svc/cloudvault-dashboard 8080:8080 -n cloudvault
 ```
 
 **Features:**
 - **Overview**: Monthly spend summary and potential savings.
 - **Cost Analysis**: High-density charts and per-PVC cost inventory.
-- **Optimization**: Filterable list of findings with one-click `kubectl` commands.
-- **Responsive Navigation**: Full sidebar (desktop) or drawer navigation (mobile).
+- **Governance**: Visual progress bars for budget tracking and policy status.
+- **Autonomous Status**: Real-time monitoring of migration workflows.
 
 ---
 
 ## 🗺️ Roadmap
 
 - **Day 1-2**: MVP Core (Agent, CLI, Calculator) ✅
-- **Day 3**: Testing & Refinement ✅
-- **Day 4**: Enhanced Intelligence (Prometheus Integration) ✅
-- **Day 5**: Documentation & Demo Prep ✅
-- **Day 6**: Professional Web UI (Multi-View Sidebar Layout) ✅
+- **Day 3-4**: Testing & Prometheus Integration ✅
+- **Day 5-6**: Professional Web UI & Multi-View Layout ✅
 - **Day 7**: Deep Tech Implementation (AI, eBPF, SIG) ✅
-- **Phase 9**: Enterprise Hardening & Scaling ✅
-- **Future**: GitOps Integration & Admission Controllers 🏗️
+- **Phase 9-10**: Enterprise Hardening & Budget Enforcement ✅
+- **Phase 11**: Multi-Cluster Orchestration (Argo) ✅
+- **Current**: CNCF Sandbox Graduation & One-Command Helm Release 🏆
 
 ---
 
