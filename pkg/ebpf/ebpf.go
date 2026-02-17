@@ -38,13 +38,16 @@ func NewAgent() (*Agent, error) {
 
 // Close cleans up eBPF resources
 func (a *Agent) Close() error {
+	if a == nil {
+		return nil
+	}
 	return a.objs.Close()
 }
 
 // GetEgressStats retrieves the latest stats from the eBPF map
 func (a *Agent) GetEgressStats() (map[string]uint64, error) {
-	// Robustness check for stub mode (CI/CD)
-	if a.objs.EgressMap == nil {
+	// Robustness check for nil receiver or stub mode (CI/CD)
+	if a == nil || a.objs.EgressMap == nil {
 		return map[string]uint64{
 			"10.0.1.5": 157286400, // Simulated data
 		}, nil
@@ -73,9 +76,9 @@ func (a *Agent) GetEgressStats() (map[string]uint64, error) {
 
 // AttachToInterface attaches the socket filter to a network interface
 func (a *Agent) AttachToInterface(ifaceName string) (link.Link, error) {
-	// Robustness check for stub mode (CI/CD)
-	if a.objs.EgressFilter == nil {
-		return nil, fmt.Errorf("eBPF filter not loaded (stub mode)")
+	// Robustness check for nil receiver or stub mode (CI/CD)
+	if a == nil || a.objs.EgressFilter == nil {
+		return nil, fmt.Errorf("eBPF filter not loaded (nil agent or stub mode)")
 	}
 
 	iface, err := net.InterfaceByName(ifaceName)
