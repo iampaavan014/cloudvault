@@ -1,9 +1,9 @@
 # Default values for cloudvault.
 
 image:
-  repository: cloudvault
+  repository: ghcr.io/iampaavan014/cloudvault
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 serviceAccount:
   create: true
