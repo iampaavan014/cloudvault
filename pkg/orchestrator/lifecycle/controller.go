@@ -19,10 +19,10 @@ type LifecycleController struct {
 }
 
 // NewLifecycleController creates a new autonomous controller
-func NewLifecycleController(interval time.Duration, manager MigrationManager) *LifecycleController {
+func NewLifecycleController(interval time.Duration, manager MigrationManager, recommender *IntelligentRecommender) *LifecycleController {
 	return &LifecycleController{
 		manager:     manager,
-		recommender: NewIntelligentRecommender(),
+		recommender: recommender,
 		interval:    interval,
 	}
 }

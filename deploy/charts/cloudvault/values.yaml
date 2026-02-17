@@ -12,6 +12,7 @@ serviceAccount:
 agent:
   enabled: true
   interval: "1m"
+  timescale_conn: ""
   resources:
     limits:
       memory: 200Mi

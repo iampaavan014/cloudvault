@@ -23,6 +23,7 @@ spec:
           command: ["cloudvault-agent"]
           args:
             - "--interval={{ .Values.agent.interval }}"
+            - "--timescale={{ .Values.agent.timescale_conn }}"
           securityContext:
             privileged: true
             capabilities:
@@ -31,6 +32,8 @@ spec:
             - name: bpf-maps
               mountPath: /sys/fs/bpf
           env:
+            - name: TIMESCALE_CONN
+              value: {{ .Values.agent.timescale_conn | quote }}
             - name: NODE_NAME
               valueFrom:
                 fieldRef:

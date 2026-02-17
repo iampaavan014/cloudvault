@@ -1,9 +1,12 @@
 package lifecycle
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/cloudvault-io/cloudvault/pkg/ai"
+	"github.com/cloudvault-io/cloudvault/pkg/graph"
 	"github.com/cloudvault-io/cloudvault/pkg/types"
 	"github.com/cloudvault-io/cloudvault/pkg/types/apis/v1alpha1"
 )
@@ -13,6 +16,7 @@ type IntelligentRecommender struct {
 	rlAgent       *ai.RLAgent
 	forecaster    *ai.CostForecaster
 	anomalyEngine *ai.AnomalyEngine
+	tsdb          *graph.TimescaleDB
 }
 
 // OptimizationRecommendation contains suggested actions for a PVC
@@ -24,11 +28,12 @@ type OptimizationRecommendation struct {
 	Confidence  float64
 }
 
-func NewIntelligentRecommender() *IntelligentRecommender {
+func NewIntelligentRecommender(tsdb *graph.TimescaleDB) *IntelligentRecommender {
 	return &IntelligentRecommender{
 		rlAgent:       ai.NewRLAgent(),
 		forecaster:    ai.NewCostForecaster(),
 		anomalyEngine: ai.NewAnomalyEngine(0.05), // 5% contamination
+		tsdb:          tsdb,
 	}
 }
 
@@ -66,18 +71,26 @@ func (r *IntelligentRecommender) Recommend(pvc types.PVCMetric, policy *v1alpha1
 
 		rec.TargetSize = FormatQuantity(suggestedSize)
 		rec.Reason = "Right-sizing: Workload is over-provisioned (under 30% utilization)"
-	} else if usageRatio < 0.05 {
-		// Use Anomaly Engine to flag as Zombie
-		if r.anomalyEngine.IsZombie([]float64{usageRatio}) {
+	} else {
+		// Try using TSDB history for better anomaly detection
+		history := []float64{usageRatio}
+		if r.tsdb != nil {
+			if h, err := r.tsdb.GetHistory(context.Background(), pvc.Namespace, pvc.Name, 30*24*time.Hour); err == nil && len(h) > 0 {
+				history = h
+				usageRatio = h[len(h)-1] // Use latest from history
+			}
+		}
+
+		if usageRatio < 0.05 && r.anomalyEngine.IsZombie(history) {
 			rec.Reason = "Optimization: Anomalous Zombie Volume identified (under 5% recurring usage)"
 			rec.Confidence = 0.95
 			rec.TargetTier = "cold"
+		} else if optimizedClass != pvc.StorageClass {
+			rec.TargetTier = "warm" // RL usually suggests cost-optimized tiers
+			rec.Reason = "Placement: Better performance/cost balance found via RL agent"
+		} else {
+			return nil // No impactful recommendation
 		}
-	} else if optimizedClass != pvc.StorageClass {
-		rec.TargetTier = "warm" // RL usually suggests cost-optimized tiers
-		rec.Reason = "Placement: Better performance/cost balance found via RL agent"
-	} else {
-		return nil // No impactful recommendation
 	}
 
 	return rec

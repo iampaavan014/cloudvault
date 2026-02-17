@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/cilium/ebpf v0.20.0
 	github.com/golang-jwt/jwt/v4 v4.5.2
+	github.com/lib/pq v1.11.2
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/prometheus/client_golang v1.23.2
 	gopkg.in/yaml.v3 v3.0.1

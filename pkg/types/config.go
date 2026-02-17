@@ -12,6 +12,7 @@ type Config struct {
 	PrometheusURL string        `yaml:"prometheus_url" json:"prometheus_url"`
 	DashboardPort int           `yaml:"dashboard_port" json:"dashboard_port"`
 	Provider      string        `yaml:"provider" json:"provider"`
+	TimescaleConn string        `yaml:"timescale_conn" json:"timescale_conn"`
 	Mock          bool          `yaml:"mock" json:"mock"`
 }
 

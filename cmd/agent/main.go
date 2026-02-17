@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudvault-io/cloudvault/pkg/collector"
 	"github.com/cloudvault-io/cloudvault/pkg/cost"
+	"github.com/cloudvault-io/cloudvault/pkg/graph"
 	"github.com/cloudvault-io/cloudvault/pkg/integrations"
 	"github.com/cloudvault-io/cloudvault/pkg/orchestrator/lifecycle"
 	"github.com/cloudvault-io/cloudvault/pkg/types"
@@ -31,6 +32,7 @@ var (
 	namespace       = flag.String("namespace", "", "Namespace to monitor")
 	showVersion     = flag.Bool("version", false, "Show version information")
 	promURL         = flag.String("prometheus", "", "Prometheus URL")
+	tsdbConn        = flag.String("timescale", "", "TimescaleDB connection string")
 )
 
 func main() {
@@ -60,6 +62,9 @@ func main() {
 	}
 	if *promURL != "" {
 		cfg.PrometheusURL = *promURL
+	}
+	if *tsdbConn != "" {
+		cfg.TimescaleConn = *tsdbConn
 	}
 
 	slog.Info("CloudVault Agent starting", "version", Version, "interval", cfg.Interval)
@@ -98,10 +103,22 @@ func main() {
 	// Create PVC collector
 	pvcCollector := collector.NewPVCCollector(client, promClient)
 
+	// Create TimescaleDB client (Phase 22: Metrics Persistence)
+	var tsdb *graph.TimescaleDB
+	if cfg.TimescaleConn != "" {
+		tsdb, err = graph.NewTimescaleDB(cfg.TimescaleConn)
+		if err != nil {
+			slog.Warn("Failed to connect to TimescaleDB", "error", err)
+		} else {
+			slog.Info("TimescaleDB persistence enabled")
+		}
+	}
+
 	// Create autonomous Lifecycle Controller (Phase 4 Pillar 3)
 	lifecycleInterval := 1 * time.Minute // Frequent evaluation for "Rock Solid" demo
 	migrationManager := lifecycle.NewArgoMigrationManager(client.GetDynamicClient())
-	lc := lifecycle.NewLifecycleController(lifecycleInterval, migrationManager)
+	recommender := lifecycle.NewIntelligentRecommender(tsdb)
+	lc := lifecycle.NewLifecycleController(lifecycleInterval, migrationManager, recommender)
 
 	// Initial policy fetch
 	policies, err := client.ListStoragePolicies(ctx)
@@ -128,13 +145,23 @@ func main() {
 
 	// Collect immediately on startup
 	slog.Info("Starting metrics collection loop")
-	collectAndDisplay(ctx, pvcCollector, cfg.Namespace)
+	metrics := collectAndDisplay(ctx, pvcCollector, cfg.Namespace)
+	if tsdb != nil && len(metrics) > 0 {
+		if err := tsdb.RecordMetrics(ctx, metrics); err != nil {
+			slog.Error("Failed to record metrics to TSDB", "error", err)
+		}
+	}
 
 	// Main loop
 	for {
 		select {
 		case <-ticker.C:
-			collectAndDisplay(ctx, pvcCollector, cfg.Namespace)
+			metrics := collectAndDisplay(ctx, pvcCollector, cfg.Namespace)
+			if tsdb != nil && len(metrics) > 0 {
+				if err := tsdb.RecordMetrics(ctx, metrics); err != nil {
+					slog.Error("Failed to record metrics to TSDB", "error", err)
+				}
+			}
 
 		case sig := <-sigChan:
 			slog.Info("Shutting down gracefully", "signal", sig)
@@ -144,7 +171,7 @@ func main() {
 }
 
 // collectAndDisplay triggers a PVC metrics collection cycle and prints the results to stdout.
-func collectAndDisplay(ctx context.Context, collector *collector.PVCCollector, namespace string) {
+func collectAndDisplay(ctx context.Context, collector *collector.PVCCollector, namespace string) []types.PVCMetric {
 	var metrics []types.PVCMetric
 	var err error
 
@@ -156,7 +183,7 @@ func collectAndDisplay(ctx context.Context, collector *collector.PVCCollector, n
 
 	if err != nil {
 		slog.Error("Collection error", "error", err)
-		return
+		return nil
 	}
 
 	// Calculate summary
@@ -221,4 +248,5 @@ func collectAndDisplay(ctx context.Context, collector *collector.PVCCollector, n
 	}
 
 	fmt.Printf("\n⏰ Next collection at %s\n\n", time.Now().Add(*collectInterval).Format("15:04:05"))
+	return metrics
 }
