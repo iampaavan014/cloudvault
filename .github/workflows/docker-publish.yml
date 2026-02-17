@@ -35,10 +35,14 @@ jobs:
             exit 1
           fi
 
+      - name: Build Web UI
+        run: make build-web
+
       - name: Run lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          args: --timeout=10m
 
       - name: Run unit tests
         run: make unittest

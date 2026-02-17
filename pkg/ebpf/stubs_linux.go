@@ -5,6 +5,7 @@ package ebpf
 import (
 	"io"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 )
 
@@ -13,22 +14,12 @@ import (
 // when the generated artifacts are missing.
 
 type egressObjects struct {
-	EgressMap    *ebpfMap
-	EgressFilter *ebpfProgram
+	EgressMap    *ebpf.Map
+	EgressFilter *ebpf.Program
 	io.Closer
 }
 
 func (o *egressObjects) Close() error { return nil }
-
-type ebpfMap struct{}
-type ebpfProgram struct{}
-
-func (m *ebpfMap) Iterate() *ebpfIter { return &ebpfIter{} }
-
-type ebpfIter struct{}
-
-func (i *ebpfIter) Next(key interface{}, val interface{}) bool { return false }
-func (i *ebpfIter) Err() error                                 { return nil }
 
 type egressEgressStats struct {
 	Bytes uint64
@@ -40,19 +31,10 @@ func loadEgressObjects(obj interface{}, opts interface{}) error {
 
 // SocketOptions stub
 type SocketOptions struct {
-	Program *ebpfProgram
+	Program *ebpf.Program
 	Target  int
 }
 
-func AttachSocket(opts SocketOptions) (Link, error) {
+func AttachSocket(opts SocketOptions) (link.Link, error) {
 	return nil, nil
-}
-
-type Link interface {
-	Close() error
-	Update(Program interface{}) error
-	Pin(string) error
-	Unpin() error
-	Detach() error
-	Info() (*link.Info, error)
 }
