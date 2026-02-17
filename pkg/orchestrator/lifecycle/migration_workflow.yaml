@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: storage-migration-template
+  namespace: cloudvault
+spec:
+  entrypoint: migrate-storage
+  arguments:
+    parameters:
+      - name: pvc-name
+      - name: src-namespace
+      - name: src-cluster
+      - name: dst-cluster
+      - name: target-storage-class
+
+  templates:
+    - name: migrate-storage
+      steps:
+        - - name: create-snapshot
+            template: run-cloudvault-cmd
+            arguments:
+              parameters:
+                - name: cmd
+                  value: "cloudvault snapshot create {{item}}"
+            withItems:
+              - "{{workflow.parameters.pvc-name}}"
+
+        - - name: transfer-data
+            template: transfer-job
+        
+        - - name: restore-at-destination
+            template: run-cloudvault-cmd
+            arguments:
+              parameters:
+                - name: cmd
+                  value: "cloudvault restore {{workflow.parameters.pvc-name}} --target-class {{workflow.parameters.target-storage-class}}"
+
+    - name: run-cloudvault-cmd
+      inputs:
+        parameters:
+          - name: cmd
+      container:
+        image: cloudvault/cli:latest
+        command: ["/bin/sh", "-c"]
+        args: ["{{inputs.parameters.cmd}}"]
+
+    - name: transfer-job
+      container:
+        image: rclone/rclone:latest
+        command: ["rclone"]
+        args: ["sync", "src:backup", "dst:restore", "--progress"]

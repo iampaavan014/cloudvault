@@ -1,0 +1,60 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# Binaries
+bin/
+cloudvault
+cloudvault-agent
+main
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Web dependencies and build
+web/node_modules/
+web/dist/
+pkg/dashboard/dist/
+
+# Logs
+*.log
+rec_output.txt
+mock_rec_output.txt
+
+# Coverage
+coverage.out
+coverage.html
+
+# Local environment
+.env
+.env.local
+
+# Temporary / Test manifests
+*stress*.yaml
+test_lifecycle_policy.yaml
+pvc_manifest.yaml
+deploy/production_budget.yaml
+deploy/argo-crd.yaml
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
