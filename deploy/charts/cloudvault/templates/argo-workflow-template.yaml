@@ -65,6 +65,7 @@ spec:
             TARGET_SC="{{`{{inputs.parameters.target-storage-class}}`}}"
             TARGET_SIZE="{{`{{inputs.parameters.target-size}}`}}"
             TARGET_TIER="{{`{{inputs.parameters.target-tier}}`}}"
+            if [ -z "${TARGET_TIER}" ]; then TARGET_TIER="standard"; fi
             NEW_PVC_NAME="${PVC_NAME}-migrated"
             
             echo "🔧 Fetching source PVC: ${PVC_NAME} in namespace ${SRC_NS}"

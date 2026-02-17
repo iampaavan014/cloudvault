@@ -10,8 +10,9 @@ import (
 
 // IntelligentRecommender combines multiple AI models to provide optimization advice
 type IntelligentRecommender struct {
-	rlAgent    *ai.RLAgent
-	forecaster *ai.CostForecaster
+	rlAgent       *ai.RLAgent
+	forecaster    *ai.CostForecaster
+	anomalyEngine *ai.AnomalyEngine
 }
 
 // OptimizationRecommendation contains suggested actions for a PVC
@@ -25,8 +26,9 @@ type OptimizationRecommendation struct {
 
 func NewIntelligentRecommender() *IntelligentRecommender {
 	return &IntelligentRecommender{
-		rlAgent:    ai.NewRLAgent(),
-		forecaster: ai.NewCostForecaster(),
+		rlAgent:       ai.NewRLAgent(),
+		forecaster:    ai.NewCostForecaster(),
+		anomalyEngine: ai.NewAnomalyEngine(0.05), // 5% contamination
 	}
 }
 
@@ -64,6 +66,13 @@ func (r *IntelligentRecommender) Recommend(pvc types.PVCMetric, policy *v1alpha1
 
 		rec.TargetSize = FormatQuantity(suggestedSize)
 		rec.Reason = "Right-sizing: Workload is over-provisioned (under 30% utilization)"
+	} else if usageRatio < 0.05 {
+		// Use Anomaly Engine to flag as Zombie
+		if r.anomalyEngine.IsZombie([]float64{usageRatio}) {
+			rec.Reason = "Optimization: Anomalous Zombie Volume identified (under 5% recurring usage)"
+			rec.Confidence = 0.95
+			rec.TargetTier = "cold"
+		}
 	} else if optimizedClass != pvc.StorageClass {
 		rec.TargetTier = "warm" // RL usually suggests cost-optimized tiers
 		rec.Reason = "Placement: Better performance/cost balance found via RL agent"

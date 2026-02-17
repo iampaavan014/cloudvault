@@ -92,13 +92,22 @@ func (ac *AdmissionController) validate(req *admissionv1.AdmissionRequest) *admi
 	// Check against dynamic CostPolicies
 	slog.Info("Evaluating policies against estimated cost", "pvc", pvc.Name, "cost", estimatedCost, "policies", len(ac.policies))
 	for _, policy := range ac.policies {
-		if policy.Spec.Budget > 0 && estimatedCost > policy.Spec.Budget {
-			slog.Warn("PVC blocked by policy", "pvc", pvc.Name, "policy", policy.Name, "cost", estimatedCost, "budget", policy.Spec.Budget)
+		if estimatedCost > policy.Spec.Budget {
+			if policy.Spec.Action == "block" {
+				slog.Warn("PVC BLOCK ENFORCED", "pvc", pvc.Name, "policy", policy.Name, "cost", estimatedCost, "budget", policy.Spec.Budget)
+				return &admissionv1.AdmissionResponse{
+					Allowed: false,
+					Result: &metav1.Status{
+						Message: fmt.Sprintf("CloudVault Policy Enforcement (STRICT): Estimated monthly cost ($%.2f) exceeds policy '%s' budget limit ($%.2f)",
+							estimatedCost, policy.Name, policy.Spec.Budget),
+					},
+				}
+			}
+			// Fallback to warning if action is not block (e.g., alert)
 			return &admissionv1.AdmissionResponse{
-				Allowed: false,
-				Result: &metav1.Status{
-					Message: fmt.Sprintf("CloudVault Policy Enforcement: Estimated monthly cost (%.2f) exceeds policy '%s' budget limit ($%.2f)",
-						estimatedCost, policy.Name, policy.Spec.Budget),
+				Allowed: true,
+				Warnings: []string{
+					fmt.Sprintf("CloudVault POLICY ALERT: Estimated monthly cost ($%.2f) exceeds budget limit ($%.2f)", estimatedCost, policy.Spec.Budget),
 				},
 			}
 		}
