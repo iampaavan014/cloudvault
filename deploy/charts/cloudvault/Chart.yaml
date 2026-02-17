@@ -6,3 +6,9 @@ version: 0.1.0-alpha
 appVersion: "0.1.0-alpha"
 maintainers:
   - name: CloudVault
+
+dependencies:
+  - name: argo-workflows
+    version: "0.41.0"
+    repository: https://argoproj.github.io/argo-helm
+    condition: argo.enabled

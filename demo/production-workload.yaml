@@ -1,0 +1,89 @@
+# Production Database - High-cost io1 storage (should migrate to gp3)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-primary
+  namespace: default
+  labels:
+    app: database
+    tier: production
+    workload: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard  # Simulating expensive io1
+  resources:
+    requests:
+      storage: 100Gi
+---
+# Application Logs - Over-provisioned on io1 (should migrate to gp3 or s3)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-logs-archive
+  namespace: default
+  labels:
+    app: logging
+    tier: production
+    workload: logs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard  # Expensive for cold data
+  resources:
+    requests:
+      storage: 200Gi
+---
+# Redis Cache - Moderate usage (gp3 is optimal)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-cache
+  namespace: default
+  labels:
+    app: cache
+    tier: production
+    workload: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 50Gi
+---
+# ML Model Storage - Infrequently accessed (should tier to s3)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models
+  namespace: default
+  labels:
+    app: ml-platform
+    tier: production
+    workload: models
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 500Gi
+---
+# Backup Storage - Cold data (should migrate to s3)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-vault
+  namespace: default
+  labels:
+    app: backup
+    tier: production
+    workload: backups
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 1000Gi

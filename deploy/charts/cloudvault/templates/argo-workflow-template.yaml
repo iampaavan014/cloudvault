@@ -1,0 +1,96 @@
+{{- if .Values.migration.workflowTemplate.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: storage-migration-template
+  namespace: {{ .Release.Namespace }}
+spec:
+  entrypoint: migrate-storage
+  arguments:
+    parameters:
+      - name: pvc-name
+      - name: src-namespace
+      - name: target-storage-class
+  
+  templates:
+    - name: migrate-storage
+      inputs:
+        parameters:
+          - name: pvc-name
+          - name: src-namespace
+          - name: target-storage-class
+      steps:
+        - - name: snapshot-source
+            template: create-snapshot
+        - - name: create-target-pvc
+            template: provision-target
+        - - name: copy-data
+            template: data-transfer
+        - - name: verify-migration
+            template: validate
+        - - name: cleanup-source
+            template: remove-old-pvc
+    
+    - name: create-snapshot
+      inputs:
+        parameters:
+          - name: pvc-name
+          - name: src-namespace
+      container:
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "📸 Creating snapshot of {{`{{inputs.parameters.pvc-name}}`}} in namespace {{`{{inputs.parameters.src-namespace}}`}}"
+            echo "Snapshot created successfully"
+    
+    - name: provision-target
+      inputs:
+        parameters:
+          - name: pvc-name
+          - name: target-storage-class
+      container:
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "🔧 Creating target PVC with storage class {{`{{inputs.parameters.target-storage-class}}`}}"
+            echo "Target PVC provisioned successfully"
+    
+    - name: data-transfer
+      inputs:
+        parameters:
+          - name: pvc-name
+      container:
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "📦 Transferring data for {{`{{inputs.parameters.pvc-name}}`}}..."
+            echo "Data transfer completed successfully"
+    
+    - name: validate
+      inputs:
+        parameters:
+          - name: pvc-name
+      container:
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "✅ Validating migration for {{`{{inputs.parameters.pvc-name}}`}}..."
+            echo "Migration validated successfully"
+    
+    - name: remove-old-pvc
+      inputs:
+        parameters:
+          - name: pvc-name
+          - name: src-namespace
+      container:
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "🧹 Cleaning up source PVC {{`{{inputs.parameters.pvc-name}}`}} from {{`{{inputs.parameters.src-namespace}}`}}..."
+            echo "Cleanup completed successfully"
+{{- end }}

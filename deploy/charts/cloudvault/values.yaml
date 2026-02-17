@@ -47,3 +47,34 @@ policies:
       - name: warm
         storageClass: sc1
         duration: 1h
+
+# Argo Workflows Integration (optional dependency)
+argo:
+  # Enable to install Argo Workflows alongside CloudVault
+  # Set to false if you already have Argo Workflows installed
+  enabled: false
+  
+  # Argo Workflows configuration (when enabled)
+  controller:
+    resources:
+      limits:
+        memory: 512Mi
+        cpu: 500m
+      requests:
+        memory: 256Mi
+        cpu: 100m
+  
+  server:
+    enabled: true
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: 200m
+      requests:
+        memory: 128Mi
+        cpu: 50m
+
+# Migration Workflow Template
+migration:
+  workflowTemplate:
+    enabled: true

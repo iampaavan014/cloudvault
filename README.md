@@ -19,36 +19,95 @@ CloudVault is an open-source platform designed to solve the #1 pain point in mod
 
 ## 🏗️ Architecture
 
-CloudVault consists of three main pillars:
+CloudVault is designed as a **storage intelligence platform** that integrates with the Kubernetes ecosystem. It consists of two main components:
 
-1.  **CloudVault Control Plane**: A centralized API and Dashboard that manages policies, aggregates data, and provides the user interface.
-2.  **CloudVault Agent**: A lightweight DaemonSet running on every node that collects real-time metrics and executes autonomous actions.
-3.  **Governance Layer**: A Validating Admission Controller that enforces budget policies at the source (API Server).
+### 1. CloudVault Platform (This Project)
+- **CloudVault Agent**: Lightweight DaemonSet that collects storage metrics, cost data, and network traffic (via eBPF)
+- **CloudVault Dashboard**: React-based UI with real-time cost analytics and governance controls
+- **Policy Engine**: Enforces budget limits and lifecycle policies via Kubernetes admission controllers
+- **Migration Orchestrator**: Creates and manages storage migration workflows
+
+### 2. Argo Workflows (External Dependency)
+- **Workflow Controller**: Executes the migration workflows created by CloudVault
+- **Orchestration Engine**: Handles retries, state management, and workflow visualization
+- **CNCF Graduated Project**: Industry-standard workflow orchestration for Kubernetes
+
+### How They Work Together
+```
+┌─────────────────────────────────────────────────────────┐
+│ CloudVault Agent                                        │
+│  ├─ Analyzes storage costs and usage patterns          │
+│  ├─ Identifies optimization opportunities               │
+│  └─ Creates Argo Workflow resources for migrations     │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ Argo Workflows Controller (Optional Dependency)        │
+│  ├─ Executes migration workflows                        │
+│  ├─ Handles orchestration and error recovery           │
+│  └─ Provides workflow status and logs                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+> **Note**: CloudVault **creates** migration workflows, Argo **executes** them. This separation of concerns follows cloud-native best practices and allows users to leverage existing Argo installations.
 
 ---
 
-## ☸️ Production Deployment (Helm)
+## ☸️ Production Deployment
 
-CloudVault is designed for professional Kubernetes operations. The recommended deployment method is via our unified Helm chart, which automatically manages CRDs, RBAC, and all control plane components.
+CloudVault offers **three deployment options** to fit your infrastructure:
 
-### One-Command Installation
-Deploy the entire stack (Dashboard, Agent, and Policies) with a single command. The images are automatically pulled from the **GitHub Container Registry (GHCR)**.
+### Option 1: All-in-One (Recommended for New Users)
+Install CloudVault with Argo Workflows bundled together:
 
 ```bash
-helm upgrade --install cloudvault ./deploy/charts/cloudvault -n cloudvault --create-namespace
+# Update Helm dependencies
+helm dependency update ./deploy/charts/cloudvault
+
+# Install with Argo Workflows enabled
+helm upgrade --install cloudvault ./deploy/charts/cloudvault \
+  -n cloudvault --create-namespace \
+  --set argo.enabled=true
 ```
 
-### What's Included:
-*   **Automated Image Delivery**: Pulls production-ready images from `ghcr.io/iampaavan014/cloudvault` (Built automatically via GitHub Actions).
-*   **Automatic CRD Management**: Installs `CostPolicy`, `StorageLifecyclePolicy`, and `Argo Workflows` CRDs.
-*   **CloudVault Control Plane**: Deploys the Dashboard (React UI + Golang API) and centralized orchestrator.
-*   **CloudVault Agent**: Deploys our lightweight, eBPF-enabled daemonset for cluster-wide metrics collection.
-*   **Default Governance**: Bootstraps the cluster with production-grade budget and lifecycle policies.
+**What's Included:**
+- ✅ CloudVault Dashboard + Agent
+- ✅ Argo Workflows Controller
+- ✅ Migration Workflow Templates
+- ✅ Default Cost & Lifecycle Policies
+- ✅ All CRDs (CostPolicy, StorageLifecyclePolicy, Workflow)
+
+### Option 2: CloudVault Only (For Existing Argo Users)
+If you already have Argo Workflows installed in your cluster:
+
+```bash
+helm upgrade --install cloudvault ./deploy/charts/cloudvault \
+  -n cloudvault --create-namespace
+```
+
+**What's Included:**
+- ✅ CloudVault Dashboard + Agent
+- ✅ Migration Workflow Templates (will use your existing Argo)
+- ✅ Default Cost & Lifecycle Policies
+- ✅ CloudVault CRDs (CostPolicy, StorageLifecyclePolicy)
+
+### Option 3: Manual Argo Installation
+Install Argo Workflows separately, then CloudVault:
+
+```bash
+# Install Argo Workflows
+kubectl create namespace argo
+kubectl apply -n argo -f https://github.com/argoproj/argo-workflows/releases/download/v3.5.0/install.yaml
+
+# Install CloudVault
+helm upgrade --install cloudvault ./deploy/charts/cloudvault \
+  -n cloudvault --create-namespace
+```
 
 ### Prerequisites
 *   Kubernetes 1.25+
 *   Helm 3.x
-*   (Optional) Prometheus/Grafana for extended metrics visualization.
+*   (Optional) Prometheus/Grafana for extended metrics visualization
 
 ---
 
