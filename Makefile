@@ -136,12 +136,41 @@ run-agent: build-agent
 	@echo "🚀 Running CloudVault Agent..."
 	./$(BUILD_DIR)/$(BINARY_AGENT) --kubeconfig ~/.kube/config --interval 1m
 
-## docker: Build Docker image
+## docker: Build Docker images
 docker:
-	@echo "🐳 Building Docker image..."
+	@echo "🐳 Building Docker images..."
 	docker build -t cloudvault/agent:$(VERSION) -f deploy/Dockerfile .
 	docker build -t cloudvault/agent:latest -f deploy/Dockerfile .
-	@echo "✅ Docker image built"
+	docker build -t cloudvault/ai:$(VERSION) -f deploy/Dockerfile.ai .
+	docker build -t cloudvault/ai:latest -f deploy/Dockerfile.ai .
+	@echo "✅ Docker images built"
+
+## cluster-clean: Remove all Helm-managed CloudVault resources from the cluster
+cluster-clean:
+	@echo "🧹 Removing CloudVault Helm release..."
+	-helm uninstall cloudvault -n cloudvault 2>/dev/null || true
+	@echo "✅ Cluster cleaned"
+
+## production-deploy: Build images and deploy via Helm (single command)
+production-deploy: build docker
+	@echo "☸️  Deploying CloudVault to cluster via Helm..."
+	@# Load images into kind cluster (no registry required)
+	-kind load docker-image cloudvault/agent:latest --name cloudvault-test
+	-kind load docker-image cloudvault/ai:latest --name cloudvault-test
+	@echo "📦 Running Helm upgrade --install..."
+	helm upgrade --install cloudvault ./deploy/charts/cloudvault \
+		--namespace cloudvault \
+		--create-namespace \
+		--set image.repository=cloudvault/agent \
+		--set image.tag=latest \
+		--set ai.repository=cloudvault/ai \
+		--set ai.tag=latest \
+		--atomic \
+		--timeout 5m
+	@echo ""
+	@echo "✅ Production deployment complete!"
+	@echo "💡 Access dashboard: kubectl port-forward svc/cloudvault-dashboard 8080:8080 -n cloudvault"
+	@echo "💡 Access AI svc:    kubectl port-forward svc/cloudvault-ai 5005:5005 -n cloudvault"
 
 ## install: Install CLI to /usr/local/bin
 install: build-cli

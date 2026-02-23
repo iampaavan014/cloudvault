@@ -53,61 +53,40 @@ CloudVault is designed as a **storage intelligence platform** that integrates wi
 
 ---
 
-## ☸️ Production Deployment
+## ☸️ Production Deployment (One-Command)
 
-CloudVault offers **three deployment options** to fit your infrastructure:
+CloudVault is production-ready and can be deployed to any Kubernetes cluster via Helm in a single command. 
 
-### Option 1: All-in-One (Recommended for New Users)
-Install CloudVault with Argo Workflows bundled together:
-
-```bash
-# Update Helm dependencies
-helm dependency update ./deploy/charts/cloudvault
-
-# Install with Argo Workflows enabled
-helm upgrade --install cloudvault ./deploy/charts/cloudvault \
-  -n cloudvault --create-namespace \
-  --set argo.enabled=true
-```
-
-**What's Included:**
-- ✅ CloudVault Dashboard + Agent
-- ✅ Argo Workflows Controller
-- ✅ Migration Workflow Templates
-- ✅ Default Cost & Lifecycle Policies
-- ✅ All CRDs (CostPolicy, StorageLifecyclePolicy, Workflow)
-
-### Option 2: CloudVault Only (For Existing Argo Users)
-If you already have Argo Workflows installed in your cluster:
+### One-Command Quickstart
+For a clean, production-ready installation with the integrated **PyTorch AI Intelligence** and **eBPF Monitoring**:
 
 ```bash
-helm upgrade --install cloudvault ./deploy/charts/cloudvault \
-  -n cloudvault --create-namespace
+make production-deploy
 ```
 
-**What's Included:**
-- ✅ CloudVault Dashboard + Agent
-- ✅ Migration Workflow Templates (will use your existing Argo)
-- ✅ Default Cost & Lifecycle Policies
-- ✅ CloudVault CRDs (CostPolicy, StorageLifecyclePolicy)
+This automated command performs:
+1.  **Cluster Sanitization**: Clears the `cloudvault-test` namespace and any legacy volumes.
+2.  **Containerization**: Builds the Go Agent and Python AI (Gunicorn) production images.
+3.  **Local Image Loading**: Sideloads images into your `kind` cluster.
+4.  **Helm Orchestration**: Installs the full stack with high-performance configurations.
 
-### Option 3: Manual Argo Installation
-Install Argo Workflows separately, then CloudVault:
+### 🍱 Multi-Service Architecture
+The production deployment includes:
+- **CloudVault Agent**: DaemonSet for kernel-level eBPF monitoring (Port 8080).
+- **CloudVault AI**: Microservice powered by PyTorch & Gunicorn (Port 5005).
+- **CloudVault Dashboard**: React-based professional cost analytics.
 
-```bash
-# Install Argo Workflows
-kubectl create namespace argo
-kubectl apply -n argo -f https://github.com/argoproj/argo-workflows/releases/download/v3.5.0/install.yaml
+---
 
-# Install CloudVault
-helm upgrade --install cloudvault ./deploy/charts/cloudvault \
-  -n cloudvault --create-namespace
-```
+### Helm Configuration Options
+| Key | Default | Description |
+| :--- | :--- | :--- |
+| `agent.interval` | `1m` | Metrics collection frequency |
+| `ai.enabled` | `true` | Toggle the recursive neural network layer |
+| `dashboard.service.type` | `ClusterIP` | Service exposure strategy |
+| `argo.enabled` | `false` | Enable bundled Argo Workflows integration |
 
-### Prerequisites
-*   Kubernetes 1.25+
-*   Helm 3.x
-*   (Optional) Prometheus/Grafana for extended metrics visualization
+---
 
 ---
 

@@ -24,6 +24,7 @@ type PVCCollector struct {
 	client         *KubernetesClient
 	promClient     *integrations.PrometheusClient
 	egressProvider EgressProvider
+	regionResolver *integrations.RegionResolver
 }
 
 // NewPVCCollector creates a new instance of PVCCollector.
@@ -31,9 +32,15 @@ type PVCCollector struct {
 // promClient: Optional PrometheusClient for fetching real-time usage metrics.
 func NewPVCCollector(client *KubernetesClient, promClient *integrations.PrometheusClient) *PVCCollector {
 	return &PVCCollector{
-		client:     client,
-		promClient: promClient,
+		client:         client,
+		promClient:     promClient,
+		regionResolver: integrations.NewRegionResolver(),
 	}
+}
+
+// SetEgressProvider injects a network monitoring source
+func (c *PVCCollector) SetEgressProvider(p EgressProvider) {
+	c.egressProvider = p
 }
 
 // CollectAll collects metrics for all PVCs in the cluster using concurrent workers.
@@ -79,7 +86,7 @@ func (c *PVCCollector) CollectAll(ctx context.Context) ([]types.PVCMetric, error
 	}
 
 	// Fetch all Egress metrics in ONE batch (Phase 9 optimization)
-	var egressData map[string]uint64
+	var egressData map[string]map[string]uint64
 	if c.egressProvider != nil {
 		egressData, _ = c.egressProvider.GetEgressBytes(ctx)
 	}
@@ -137,7 +144,7 @@ func (c *PVCCollector) CollectAll(ctx context.Context) ([]types.PVCMetric, error
 
 				// Apply hyper-accurate egress data from pre-fetched batch (Phase 9 optimization)
 				if egressData != nil {
-					CorrelateEgress([]types.PVCMetric{*metric}, egressData)
+					CorrelateEgress([]types.PVCMetric{*metric}, egressData, c.regionResolver)
 				}
 
 				results <- metric

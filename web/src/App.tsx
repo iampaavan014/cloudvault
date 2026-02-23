@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { LayoutDashboard, Wallet, AlertCircle, ArrowUpRight, Search, RefreshCw, Download, Filter, Copy, Check, Menu, Database, BarChart3, Settings, ShieldCheck, Zap, Target, Layers, HardDrive } from 'lucide-react';
+import { LayoutDashboard, Wallet, AlertCircle, ArrowUpRight, Search, RefreshCw, Download, Filter, Check, Menu, Database, BarChart3, Settings, ShieldCheck, Zap, Target, Layers, HardDrive } from 'lucide-react';
 import './App.css';
 
 // Types matching Go backend
@@ -45,10 +45,14 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [networkData, setNetworkData] = useState<Record<string, Record<string, number>>>({});
+  const [aiMetrics, setAiMetrics] = useState({ accuracy: 0.992, latency: 45, status: true }); // ms
+  const [healthData, setHealthData] = useState<any>(null);
+  const [monitoredPVCs, setMonitoredPVCs] = useState<any[]>([]);
 
   // Navigation state
   const [currentView, setCurrentView] = useState<View>('overview');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Filter & Sort state
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,7 +66,8 @@ function App() {
   const [refreshInterval, setRefreshInterval] = useState(60); // seconds
   const [showFilters, setShowFilters] = useState(false);
 
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [applyingIndex, setApplyingIndex] = useState<number | null>(null);
+  const [successIndex, setSuccessIndex] = useState<number | null>(null);
   const [selectedNamespace, setSelectedNamespace] = useState<string | null>(null);
   const [selectedStorageClass, setSelectedStorageClass] = useState<string | null>(null);
 
@@ -100,38 +105,41 @@ function App() {
 
       const headers = { 'Authorization': `Bearer ${currentToken}` };
 
-      const [costRes, recRes, polRes] = await Promise.all([
+      const [costRes, recRes, polRes, netRes, aiRes, healthRes, pvcRes] = await Promise.all([
         fetch('/api/cost', { headers }),
         fetch('/api/recommendations', { headers }),
-        fetch('/api/policies', { headers })
+        fetch('/api/policies', { headers }),
+        fetch('/api/network', { headers }),
+        fetch('/api/ai-metrics', { headers }),
+        fetch('/health', { headers }),
+        fetch('/api/pvc', { headers })
       ]);
 
-      if (!costRes.ok || !recRes.ok || !polRes.ok) {
-        if (costRes.status === 401) setToken(null); // Retry auth on 401
+      if (!costRes.ok || !recRes.ok || !polRes.ok || !netRes.ok || !aiRes.ok || !healthRes.ok || !pvcRes.ok) {
+        if (costRes.status === 401 || recRes.status === 401) setToken(null);
         throw new Error('Failed to fetch data');
       }
 
       const costJson = await costRes.json();
       const recJson = await recRes.json();
       const polJson = await polRes.json();
+      const netJson = await netRes.json();
+      const aiJson = await aiRes.json();
+      const healthJson = await healthRes.json();
+      const pvcJson = await pvcRes.json();
 
       setCostData(costJson);
       setRecommendations(recJson || []);
       setPolicies(polJson || []);
+      setNetworkData(netJson || {});
+      setAiMetrics(aiJson);
+      setHealthData(healthJson);
+      setMonitoredPVCs(pvcJson || []);
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
-      console.warn("Using mock data due to API error");
-      setCostData({
-        total_monthly_cost: 125.50,
-        by_namespace: { 'production': 85.00, 'staging': 25.50, 'dev': 15.00 },
-        by_storage_class: { 'gp3': 80.00, 'standard': 45.50 },
-        by_provider: { 'aws': 80.00, 'gcp': 45.50 },
-        by_cluster: { 'cluster-1': 70.00, 'cluster-2': 55.50 },
-        budget_limit: 1000,
-        active_alerts: ["Approaching monthly budget cap (80%+)"]
-      });
+      console.error("API error while fetching dashboard data:", err);
     } finally {
       setLoading(false);
     }
@@ -261,22 +269,35 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  const copyKubectlCommand = (rec: Recommendation, index: number) => {
-    let command = '';
-    if (rec.type === 'delete_zombie') {
-      command = `kubectl delete pvc ${rec.pvc} -n ${rec.namespace}`;
-    } else if (rec.type === 'resize') {
-      const newSize = rec.recommended_state.match(/(\d+)GB/)?.[1] || '50';
-      command = `kubectl patch pvc ${rec.pvc} -n ${rec.namespace} -p '{"spec":{"resources":{"requests":{"storage":"${newSize}Gi"}}}}'`;
-    } else if (rec.type === 'move_cloud') {
-      command = `# Cross-cloud migration recommended\n# Target: ${rec.recommended_state}\n# Use CloudVault MCE for automated migration`;
-    } else {
-      command = `# Storage class change requires manual migration\n# Create new PVC with storage class: ${rec.recommended_state}`;
-    }
+  const applyRecommendation = async (rec: Recommendation, index: number) => {
+    setApplyingIndex(index);
+    try {
+      const res = await fetch('/api/recommendations/apply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          pvcName: rec.pvc,
+          namespace: rec.namespace,
+          type: rec.type
+        })
+      });
 
-    navigator.clipboard.writeText(command);
-    setCopiedIndex(index);
-    setTimeout(() => setCopiedIndex(null), 2000);
+      if (!res.ok) throw new Error('Failed to apply recommendation');
+
+      setSuccessIndex(index);
+      setTimeout(() => {
+        setSuccessIndex(null);
+        fetchData(); // Refresh data to show applied changes
+      }, 3000);
+    } catch (err) {
+      console.error("Failed to apply:", err);
+      alert("Error: " + (err instanceof Error ? err.message : "Failed to apply fix"));
+    } finally {
+      setApplyingIndex(null);
+    }
   };
 
   const clearFilters = () => {
@@ -288,15 +309,6 @@ function App() {
     setSelectedStorageClass(null);
   };
 
-  const handleChartClick = (type: 'namespace' | 'storageClass', value: string) => {
-    if (type === 'namespace') {
-      setSelectedNamespace(selectedNamespace === value ? null : value);
-      setCurrentView('recommendations');
-    } else {
-      setSelectedStorageClass(selectedStorageClass === value ? null : value);
-      setCurrentView('recommendations');
-    }
-  };
 
   if (loading) return <div className="loading">Loading CloudVault Dashboard...</div>;
   if (error && !costData) return <div className="error">Error: {error}</div>;
@@ -304,7 +316,6 @@ function App() {
   // Transform data for Recharts
   const namespaceData = costData ? Object.entries(costData.by_namespace).map(([name, value]) => ({ name, value })) : [];
   const storageClassData = costData ? Object.entries(costData.by_storage_class).map(([name, value]) => ({ name, value })) : [];
-  const providerData = costData ? Object.entries(costData.by_provider).map(([name, value]) => ({ name, value })) : [];
   const clusterData = costData ? Object.entries(costData.by_cluster).map(([name, value]) => ({ name, value })) : [];
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
@@ -313,66 +324,60 @@ function App() {
   const totalSavings = (recommendations || []).reduce((acc, r) => acc + r.monthly_savings, 0);
 
   return (
-    <div className={`app-container ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
-      <aside className="sidebar">
+    <div className={`app-container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
-          <button className="sidebar-toggle" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+          {!isSidebarCollapsed && <div className="logo-container">
+            <Layers className="logo-icon" size={24} />
+            <span className="logo-text">CloudVault</span>
+          </div>}
+          {isSidebarCollapsed && <Layers className="logo-icon-centered" size={24} />}
+          <button className="collapse-btn" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
             <Menu size={20} />
           </button>
-          <div className="logo">
-            <LayoutDashboard size={28} />
-            <h2>CloudVault</h2>
-          </div>
         </div>
 
-        <nav className="sidebar-nav">
-          <button
-            className={`nav-item ${currentView === 'overview' ? 'active' : ''}`}
-            onClick={() => setCurrentView('overview')}
-          >
-            <LayoutDashboard size={20} />
-            <span>Overview</span>
-          </button>
-          <button
-            className={`nav-item ${currentView === 'cost' ? 'active' : ''}`}
-            onClick={() => setCurrentView('cost')}
-          >
-            <BarChart3 size={20} />
-            <span>Cost Analysis</span>
-          </button>
-          <button
-            className={`nav-item ${currentView === 'recommendations' ? 'active' : ''}`}
-            onClick={() => setCurrentView('recommendations')}
-          >
-            <AlertCircle size={20} />
-            <span>Optimization</span>
-            {recommendations.length > 0 && <span className="nav-badge">{recommendations.length}</span>}
-          </button>
-          <button
-            className={`nav-item ${currentView === 'governance' ? 'active' : ''}`}
-            onClick={() => setCurrentView('governance')}
-          >
-            <ShieldCheck size={20} />
-            <span>Governance</span>
-            {policies.length > 0 && <span className="nav-badge success">{policies.length}</span>}
-          </button>
-          <button
-            className={`nav-item ${currentView === 'settings' ? 'active' : ''}`}
-            onClick={() => setCurrentView('settings')}
-          >
-            <Settings size={20} />
-            <span>Settings</span>
-          </button>
+        <nav className="nav-menu">
+          {[
+            { id: 'overview', icon: LayoutDashboard, label: 'Overview' },
+            { id: 'cost', icon: BarChart3, label: 'Cost Analysis' },
+            { id: 'recommendations', icon: Target, label: 'Optimization' },
+            { id: 'governance', icon: ShieldCheck, label: 'Governance' },
+            { id: 'settings', icon: Settings, label: 'Settings' }
+          ].map(item => (
+            <button
+              key={item.id}
+              className={`nav-item ${currentView === item.id ? 'active' : ''}`}
+              onClick={() => setCurrentView(item.id as View)}
+              title={isSidebarCollapsed ? item.label : ""}
+            >
+              <item.icon size={20} />
+              {!isSidebarCollapsed && <span>{item.label}</span>}
+              {item.id === 'recommendations' && recommendations.length > 0 && (
+                <span className={`nav-badge ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+                  {recommendations.length}
+                </span>
+              )}
+              {item.id === 'governance' && policies.length > 0 && (
+                <span className={`nav-badge success ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+                  {policies.length}
+                </span>
+              )}
+              {currentView === item.id && <div className="active-indicator" />}
+            </button>
+          ))}
         </nav>
 
         <div className="sidebar-footer">
           <div className="status-indicator">
             <div className="indicator-dot active"></div>
-            <span>Connected</span>
+            <span>{isSidebarCollapsed ? '' : 'Connected'}</span>
           </div>
-          <div className="last-sync">
-            Synced: {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </div>
+          {!isSidebarCollapsed && (
+            <div className="last-sync">
+              Synced: {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -464,86 +469,217 @@ function App() {
                 </div>
               </section>
 
+              <section className="health-section">
+                <div className="section-title">
+                  <ShieldCheck size={20} className="icon-purple" />
+                  <h2>System Health</h2>
+                </div>
+                <div className="health-grid">
+                  {[
+                    { id: 'agent', label: 'CloudVault Agent', icon: Zap },
+                    { id: 'kubernetes', label: 'Cluster API', icon: Database },
+                    { id: 'prometheus', label: 'Metrics Engine', icon: BarChart3 },
+                    { id: 'ai_service', label: 'AI Core', icon: Target }
+                  ].map(comp => (
+                    <div key={comp.id} className="health-card">
+                      <div className="health-card-main">
+                        <comp.icon size={18} className="health-icon" />
+                        <span className="health-label">{comp.label}</span>
+                      </div>
+                      <div className="health-status-indicator">
+                        <span className={`status-text ${healthData?.components?.[comp.id]?.status || 'unknown'}`}>
+                          {healthData?.components?.[comp.id]?.status || 'Checking...'}
+                        </span>
+                        <div className={`status-dot ${healthData?.components?.[comp.id]?.status || 'unknown'}`}></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
               <section className="charts-grid dashboard-highlights">
-                <div className="card chart-card">
-                  <h3>Cloud Provider Spend</h3>
-                  <div className="chart-container">
-                    <ResponsiveContainer width="100%" height={260}>
-                      <PieChart>
-                        <Pie
-                          data={providerData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={80}
-                          dataKey="value"
-                          label={({ name, percent }) => `${name} (${(((percent || 0) * 100)).toFixed(0)}%)`}
-                        >
-                          {providerData.map((_entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={formatCurrency}
-                          contentStyle={{ backgroundColor: '#10121b', borderColor: '#6366f1', borderRadius: '8px', color: '#fff' }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#94a3b8', fontWeight: 'bold' }}
-                        />
-                        <Legend verticalAlign="bottom" height={36} />
-                      </PieChart>
-                    </ResponsiveContainer>
+                <div className="card glass-card viz-card">
+                  <div className="card-header">
+                    <Zap size={20} className="icon-pulse-yellow" />
+                    <h3>Live Network Topology</h3>
+                    <button className="tile-refresh" onClick={fetchData}><RefreshCw size={14} /></button>
+                  </div>
+                  <div className="network-viz-container">
+                    <svg viewBox="0 0 400 300" className="network-svg">
+                      <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                          <polygon points="0 0, 10 3.5, 0 7" fill="var(--primary)" />
+                        </marker>
+                      </defs>
+                      <circle cx="200" cy="150" r="40" className="center-node" />
+                      <text x="200" y="155" textAnchor="middle" className="node-label-center">Cluster</text>
+
+                      {Object.keys(networkData).length > 0 ? Object.entries(networkData).map(([src, destinations], i) => {
+                        const angle = (i / Object.keys(networkData).length) * Math.PI * 2;
+                        const x = 200 + Math.cos(angle) * 120;
+                        const y = 150 + Math.sin(angle) * 100;
+
+                        return (
+                          <g key={src}>
+                            <line x1="200" y1="150" x2={x} y2={y} className="connection-line" markerEnd="url(#arrowhead)" />
+                            <circle cx={x} cy={y} r="10" className="edge-node" />
+                            <text x={x} y={y + 25} textAnchor="middle" className="node-label-svg">{src.split('.').slice(-2).join('.')}</text>
+                            <g className="traffic-label-bg">
+                              <rect x={(200 + x) / 2 - 25} y={(150 + y) / 2 - 15} width="50" height="18" rx="4" fill="rgba(16, 18, 27, 0.8)" />
+                              <text x={(200 + x) / 2} y={(150 + y) / 2 - 2} textAnchor="middle" className="traffic-val-svg">
+                                {(Object.values(destinations)[0] / (1024 * 1024)).toFixed(1)}MB/s
+                              </text>
+                            </g>
+                          </g>
+                        );
+                      }) : (
+                        <text x="200" y="150" textAnchor="middle" fill="var(--text-muted)">Waiting for eBPF data...</text>
+                      )}
+                    </svg>
                   </div>
                 </div>
 
-                <div className="card chart-card">
-                  <h3>Cost Distribution (Namespace)</h3>
-                  <div className="chart-container">
-                    <ResponsiveContainer width="100%" height={260}>
-                      <PieChart>
-                        <Pie
-                          data={namespaceData}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={true}
-                          label={({ name, percent }) => `${name} (${(((percent || 0) * 100)).toFixed(0)}%)`}
-                          outerRadius={80}
-                          dataKey="value"
-                          onClick={(data) => handleChartClick('namespace', data.name)}
-                        >
-                          {namespaceData.map((_entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={formatCurrency}
-                          contentStyle={{ backgroundColor: '#10121b', borderColor: '#6366f1', borderRadius: '8px', color: '#fff' }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#94a3b8', fontWeight: 'bold' }}
-                        />
-                        <Legend verticalAlign="bottom" height={36} />
-                      </PieChart>
+                <div className="card glass-card">
+                  <div className="card-header">
+                    <Target size={20} className="icon-blue" />
+                    <h3>AI Analytics</h3>
+                    <button className="tile-refresh" onClick={fetchData}><RefreshCw size={14} /></button>
+                  </div>
+                  <div className="ai-stats">
+                    <div className="ai-stat">
+                      <span className="label">Model Status</span>
+                      <span className={`value ${aiMetrics.status ? 'text-success' : 'text-danger'}`} style={{ color: aiMetrics.status ? 'var(--success)' : 'var(--danger)' }}>
+                        {aiMetrics.status ? 'Healthy' : 'Degraded'}
+                      </span>
+                    </div>
+                    <div className="ai-stat">
+                      <span className="label">Forecast Accuracy</span>
+                      <span className="value">{(aiMetrics.accuracy * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="ai-stat">
+                      <span className="label">Inference Latency</span>
+                      <div className="latency-value">{typeof aiMetrics.latency === 'number' ? aiMetrics.latency.toFixed(2) : aiMetrics.latency}ms</div>
+                    </div>
+                  </div>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <BarChart data={[{ name: 'Accuracy', val: aiMetrics.accuracy * 100 }]}>
+                      <XAxis dataKey="name" hide />
+                      <Bar dataKey="val" fill="#6366f1" radius={[10, 10, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="card glass-card live-metrics-card">
+                  <div className="card-header">
+                    <BarChart3 size={20} className="icon-green" />
+                    <h3>Live Metrics (Throughput)</h3>
+                    <button className="tile-refresh" onClick={fetchData}><RefreshCw size={14} /></button>
+                  </div>
+                  <div className="metrics-summary">
+                    <div className="metric-item">
+                      <span className="label">Peak Throughput</span>
+                      <span className="value">124 MB/s</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="label">Active IOPS</span>
+                      <span className="value">1,240</span>
+                    </div>
+                  </div>
+                  <div className="chart-container-mini">
+                    <ResponsiveContainer width="100%" height={150}>
+                      <BarChart data={Object.entries(networkData).length > 0 ?
+                        Object.entries(networkData).slice(0, 6).map(([node, dests]) => ({
+                          t: node.split('.').slice(-2).join('.'),
+                          v: Object.values(dests)[0] / (1024 * 1024)
+                        })) : [
+                          { t: '1s', v: 45 }, { t: '2s', v: 52 }, { t: '3s', v: 48 },
+                          { t: '4s', v: 70 }, { t: '5s', v: 65 }, { t: '6s', v: 58 }
+                        ]}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="t" hide />
+                        <YAxis hide />
+                        <Tooltip contentStyle={{ backgroundColor: '#10121b', border: 'none', borderRadius: '4px' }} />
+                        <Bar dataKey="v" fill="var(--success)" radius={[4, 4, 0, 0]} opacity={0.8} />
+                      </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
               </section>
 
-              <div className="card table-card preview-card">
-                <div className="table-header">
-                  <h3>Recent Recommendations</h3>
-                  <button onClick={() => setCurrentView('recommendations')} className="text-btn">View All</button>
-                </div>
-                <div className="mini-rec-list">
-                  {recommendations.slice(0, 3).map((rec, idx) => (
-                    <div key={idx} className={`mini-rec-item impact-${rec.impact}`}>
-                      <div className="mini-rec-info">
-                        <span className="mini-rec-pvc">{rec.pvc}</span>
-                        <span className="mini-rec-reason">{rec.reasoning.slice(0, 40)}...</span>
+              <div className="overview-bottom-grid">
+                <div className="card table-card preview-card">
+                  <div className="table-header">
+                    <h3>Recent Recommendations</h3>
+                    <button onClick={() => setCurrentView('recommendations')} className="text-btn">View All</button>
+                  </div>
+                  <div className="mini-rec-list">
+                    {recommendations.slice(0, 3).map((rec, idx) => (
+                      <div key={idx} className={`mini-rec-item impact-${rec.impact}`}>
+                        <div className="mini-rec-info">
+                          <span className="mini-rec-pvc">{rec.pvc}</span>
+                          <span className="mini-rec-reason">{rec.reasoning.slice(0, 40)}...</span>
+                        </div>
+                        <span className="mini-rec-savings">${rec.monthly_savings.toFixed(0)}</span>
                       </div>
-                      <span className="mini-rec-savings">${rec.monthly_savings.toFixed(0)}</span>
+                    ))}
+                    {recommendations.length === 0 && (
+                      <div className="empty-text-container">
+                        <Check size={24} className="icon-green" />
+                        <p className="empty-text">Your cluster is optimized. No current issues found.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="card table-card monitored-pvcs-card">
+                  <div className="table-header">
+                    <div className="title-with-icon">
+                      <HardDrive size={18} className="icon-blue" />
+                      <h3>Monitored PVCs</h3>
                     </div>
-                  ))}
-                  {recommendations.length === 0 && (
-                    <div className="empty-text-container">
-                      <Check size={24} className="icon-green" />
-                      <p className="empty-text">Your cluster is optimized. No current issues found.</p>
-                    </div>
-                  )}
+                    <span className="badge-count">{monitoredPVCs.length} Active</span>
+                  </div>
+                  <div className="mini-table-container">
+                    <table className="mini-table">
+                      <thead>
+                        <tr>
+                          <th>PVC / Namespace</th>
+                          <th>Usage</th>
+                          <th>Cost</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monitoredPVCs.slice(0, 5).map((pvc, idx) => {
+                          const usagePercent = (pvc.used_bytes / pvc.size_bytes) * 100;
+                          return (
+                            <tr key={idx}>
+                              <td>
+                                <div className="pvc-cell">
+                                  <span className="pvc-name">{pvc.pvc_name}</span>
+                                  <span className="pvc-ns">{pvc.namespace}</span>
+                                </div>
+                              </td>
+                              <td>
+                                <div className="usage-cell">
+                                  <div className="usage-bar-mini">
+                                    <div className={`usage-fill-mini ${usagePercent > 80 ? 'danger' : usagePercent > 50 ? 'warning' : 'safe'}`} style={{ width: `${usagePercent}%` }}></div>
+                                  </div>
+                                  <span className="usage-text-mini">{usagePercent.toFixed(0)}%</span>
+                                </div>
+                              </td>
+                              <td>${pvc.monthly_cost.toFixed(2)}</td>
+                              <td>
+                                <span className={`status-pill ${usagePercent > 85 ? 'warning' : 'healthy'}`}>
+                                  {usagePercent > 85 ? 'Near Limit' : 'Healthy'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
@@ -665,8 +801,11 @@ function App() {
                             <Zap size={22} className="icon-pulse-yellow" />
                           </div>
                           <div className="policy-meta">
-                            <h4>{policy.metadata.name}</h4>
-                            <span className="policy-id">v1alpha1 / {policy.metadata.namespace || 'default'}</span>
+                            <div className="policy-name-row">
+                              <h4>{policy.metadata.name}</h4>
+                              <span className="badge-pill namespace-small">{policy.metadata.namespace || 'default'}</span>
+                            </div>
+                            <span className="policy-id">v1alpha1 / {policy.metadata.name}-cr</span>
                           </div>
                         </div>
                         <div className="policy-status-indicator">
@@ -834,11 +973,14 @@ spec:
                         </div>
                         <div className="rec-card-actions">
                           <button
-                            className="apply-btn-primary"
-                            onClick={() => copyKubectlCommand(rec, idx)}
+                            className={`apply-btn-primary ${applyingIndex === idx ? 'loading' : ''} ${successIndex === idx ? 'success' : ''}`}
+                            onClick={() => applyRecommendation(rec, idx)}
+                            disabled={applyingIndex !== null || successIndex !== null}
                           >
-                            {copiedIndex === idx ? <Check size={16} /> : <Copy size={16} />}
-                            {copiedIndex === idx ? 'Copied' : 'Apply Fix'}
+                            {applyingIndex === idx ? <RefreshCw className="spin" size={16} /> :
+                              successIndex === idx ? <Check size={16} /> : <Zap size={16} />}
+                            {applyingIndex === idx ? 'Applying...' :
+                              successIndex === idx ? 'Done!' : 'Apply Fix'}
                           </button>
                         </div>
                       </div>

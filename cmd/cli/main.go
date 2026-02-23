@@ -10,6 +10,7 @@ import (
 	"github.com/cloudvault-io/cloudvault/pkg/collector"
 	"github.com/cloudvault-io/cloudvault/pkg/cost"
 	"github.com/cloudvault-io/cloudvault/pkg/dashboard"
+	"github.com/cloudvault-io/cloudvault/pkg/ebpf"
 	"github.com/cloudvault-io/cloudvault/pkg/integrations"
 	"github.com/cloudvault-io/cloudvault/pkg/types"
 )
@@ -70,7 +71,7 @@ func main() {
 			fmt.Println("Error parsing flags:", err)
 			os.Exit(1)
 		}
-		handleDashboardCommand(*kubeconfig, *promURL, *port, *mock)
+		handleDashboardCommand(*kubeconfig, promURL, port, mock)
 
 	case "version":
 		handleVersionCommand()
@@ -431,7 +432,7 @@ func displayRecommendation(num int, rec types.Recommendation) {
 	fmt.Println()
 }
 
-func handleDashboardCommand(kubeconfig string, promURL string, port int, mock bool) {
+func handleDashboardCommand(kubeconfig string, promURL *string, port *int, mock *bool) {
 	ctx := context.Background()
 
 	var clusterInfo *types.ClusterInfo
@@ -440,8 +441,15 @@ func handleDashboardCommand(kubeconfig string, promURL string, port int, mock bo
 	var err error
 
 	// Initialize Prometheus
-	if promURL != "" {
-		promClient, err = integrations.NewPrometheusClient(promURL)
+	actualPromURL := ""
+	if promURL != nil {
+		actualPromURL = *promURL
+	}
+	if actualPromURL == "" {
+		actualPromURL = os.Getenv("PROMETHEUS_URL")
+	}
+	if actualPromURL != "" {
+		promClient, err = integrations.NewPrometheusClient(actualPromURL)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "⚠️  Warning: Failed to create Prometheus client: %v\n", err)
 		} else {
@@ -450,7 +458,12 @@ func handleDashboardCommand(kubeconfig string, promURL string, port int, mock bo
 	}
 
 	provider := "aws" // Default
-	if !mock {
+	isMock := false
+	if mock != nil {
+		isMock = *mock
+	}
+
+	if !isMock {
 		// Real client
 		client, err = collector.NewKubernetesClient(kubeconfig)
 		if err != nil {
@@ -470,13 +483,33 @@ func handleDashboardCommand(kubeconfig string, promURL string, port int, mock bo
 		fmt.Println("🧪 Running in MOCK mode")
 	}
 
+	// Initialize eBPF Agent (Functional kernel monitoring)
+	var ebpfAgent *ebpf.Agent
+	if !isMock {
+		ebpfAgent, err = ebpf.NewAgent()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Warning: Failed to initialize eBPF agent: %v\n", err)
+		} else {
+			fmt.Println("🧬 eBPF kernel monitoring enabled")
+			// Try to attach to eth0
+			if _, err := ebpfAgent.AttachToInterface("eth0"); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  Warning: Failed to attach eBPF to eth0: %v\n", err)
+			}
+		}
+	}
+
 	// Start Server
 	if provider == "" {
 		provider = "aws" // Default fallback
 	}
 
-	server := dashboard.NewServer(client, promClient, provider, mock)
-	if err := server.Start(port); err != nil {
+	actualPort := 8080
+	if port != nil {
+		actualPort = *port
+	}
+
+	server := dashboard.NewServer(client, promClient, provider, isMock, ebpfAgent)
+	if err := server.Start(actualPort); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Dashboard server error: %v\n", err)
 		os.Exit(1)
 	}

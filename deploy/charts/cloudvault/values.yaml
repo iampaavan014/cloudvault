@@ -35,6 +35,23 @@ dashboard:
       memory: 256Mi
       cpu: 200m
 
+ai:
+  enabled: true
+  replicaCount: 1
+  repository: cloudvault-ai
+  tag: latest
+  pullPolicy: Never
+  service:
+    type: ClusterIP
+    port: 5005
+  resources:
+    limits:
+      memory: 1Gi
+      cpu: 500m
+    requests:
+      memory: 512Mi
+      cpu: 200m
+
 policies:
   enabled: true
   budget:
@@ -79,3 +96,20 @@ argo:
 migration:
   workflowTemplate:
     enabled: true
+
+# Prometheus Integration
+prometheus:
+  enabled: true
+  server:
+    persistentVolume:
+      enabled: false # Disable for test cluster efficiency
+    service:
+      servicePort: 80
+  alertmanager:
+    enabled: false
+  kube-state-metrics:
+    enabled: true
+  prometheus-node-exporter:
+    enabled: true
+  prometheus-pushgateway:
+    enabled: false

@@ -4,6 +4,13 @@ import (
 	"time"
 )
 
+// StorageMetrics represents aggregated storage metrics from a cluster
+type StorageMetrics struct {
+	PVCs              []PVCMetric `json:"pvcs"`
+	TotalStorageBytes int64       `json:"total_storage_bytes"`
+	UsedStorageBytes  int64       `json:"used_storage_bytes"`
+}
+
 // PVCMetric represents storage metrics for a PersistentVolumeClaim
 type PVCMetric struct {
 	// Identifiers

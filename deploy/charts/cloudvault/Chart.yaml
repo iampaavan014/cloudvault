@@ -1,14 +1,20 @@
 apiVersion: v2
 name: cloudvault
-description: Multi-Cloud Kubernetes Storage Cost Intelligence
+description: Multi-Cloud Kubernetes Storage Cost Intelligence Platform
 type: application
 version: 0.1.0-alpha
 appVersion: "0.1.0-alpha"
 maintainers:
   - name: CloudVault
+keywords:
+  - kubernetes
+  - storage
+  - cost-optimization
+  - ebpf
+  - ai
 
 dependencies:
-  - name: argo-workflows
-    version: "0.41.0"
-    repository: https://argoproj.github.io/argo-helm
-    condition: argo.enabled
+  - name: prometheus
+    version: 25.21.0
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.enabled

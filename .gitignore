@@ -58,3 +58,5 @@ deploy/argo-crd.yaml
 __pycache__/
 *.py[cod]
 *$py.class
+
+*.txt

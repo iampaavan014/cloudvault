@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies for PyTorch and Gunicorn
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install
+# Note: In a real project, we'd have a requirements.txt. 
+# For this transition, we'll install directly to ensure consistency with our existing code.
+RUN pip install --no-cache-dir flask torch numpy gunicorn
+
+# Copy AI service code
+COPY pkg/ai/python/inference_server.py .
+
+# Expose port
+EXPOSE 5005
+
+# Run with Gunicorn production server
+# 4 workers for concurrency, listening on 0.0.0.0:5005
+CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:5005", "inference_server:app"]

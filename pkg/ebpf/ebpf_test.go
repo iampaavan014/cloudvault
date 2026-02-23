@@ -17,29 +17,28 @@ func TestNewAgent(t *testing.T) {
 }
 
 func TestGetEgressStats(t *testing.T) {
-	agent, err := NewAgent()
-	if err != nil {
-		// Even if initialization fails, the hardened receiver should not panic
-		stats, err := agent.GetEgressStats()
-		if err != nil {
-			t.Fatalf("Hardened GetEgressStats failed: %v", err)
-		}
-		if len(stats) == 0 {
-			t.Error("Expected at least one egress entry from mock fallback")
-		}
-		return
-	}
+	agent, _ := NewAgent()
 
+	// even if agent is nil (on non-linux), GetEgressStats should return mock data
+	// without failing if it's hardened. Our implementation in ebpf.go is hardened.
 	stats, err := agent.GetEgressStats()
 	if err != nil {
-		t.Fatalf("Failed to get egress stats: %v", err)
+		t.Fatalf("GetEgressStats failed: %v", err)
 	}
 
 	if len(stats) == 0 {
 		t.Error("Expected at least one egress entry")
 	}
 
-	if val, ok := stats["10.0.1.5"]; !ok || val == 0 {
-		t.Errorf("Expected stat for 10.0.1.5, got %v", val)
+	// Verify granular structure: map[src]map[dst]uint64
+	for src, dsts := range stats {
+		if len(dsts) == 0 {
+			t.Errorf("No destinations for source IP %s", src)
+		}
+		for dst, bytes := range dsts {
+			if bytes == 0 {
+				t.Errorf("Zero bytes for %s -> %s", src, dst)
+			}
+		}
 	}
 }

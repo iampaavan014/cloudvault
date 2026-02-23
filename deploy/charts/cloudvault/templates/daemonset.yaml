@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: cloudvault-agent
+  namespace: {{ .Release.Namespace }}
   labels:
     app: cloudvault-agent
 spec:
@@ -10,11 +11,14 @@ spec:
       app: cloudvault-agent
   template:
     metadata:
+      annotations:
+        rollout.force: {{ now | quote }}
       labels:
         app: cloudvault-agent
     spec:
       hostPID: true
       hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       serviceAccountName: {{ .Values.serviceAccount.name }}
       containers:
         - name: agent
@@ -38,6 +42,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: CLOUDVAULT_AI_URL
+              value: "http://{{ include "cloudvault.fullname" . }}-ai.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.ai.service.port }}"
+            - name: PROMETHEUS_URL
+              {{- if .Values.prometheus.enabled }}
+              value: "http://{{ .Release.Name }}-prometheus-server.{{ .Release.Namespace }}.svc.cluster.local:80"
+              {{- else }}
+              value: "http://prometheus-server.monitoring.svc.cluster.local:80"
+              {{- end }}
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
       volumes:

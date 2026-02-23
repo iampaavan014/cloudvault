@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cloudvault-dashboard
+  namespace: {{ .Release.Namespace }}
   labels:
     app: cloudvault-dashboard
 spec:
@@ -11,6 +12,8 @@ spec:
       app: cloudvault-dashboard
   template:
     metadata:
+      annotations:
+        rollout.force: {{ now | quote }}
       labels:
         app: cloudvault-dashboard
     spec:
@@ -26,8 +29,14 @@ spec:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
           env:
             - name: PROMETHEUS_URL
+              {{- if .Values.prometheus.enabled }}
+              value: "http://{{ .Release.Name }}-prometheus-server.{{ .Release.Namespace }}.svc.cluster.local:80"
+              {{- else }}
               value: "http://prometheus-server.monitoring.svc.cluster.local:80"
+              {{- end }}
             - name: CLOUDVAULT_ADMIN_USER
               value: "admin"
             - name: CLOUDVAULT_ADMIN_PASSWORD
               value: "cloudvault-secret"
+            - name: CLOUDVAULT_AI_URL
+              value: "http://{{ include "cloudvault.fullname" . }}-ai.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.ai.service.port }}"

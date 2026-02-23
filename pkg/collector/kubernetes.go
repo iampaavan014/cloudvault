@@ -181,6 +181,11 @@ func (k *KubernetesClient) GetClientset() *kubernetes.Clientset {
 	return k.clientset
 }
 
+// GetConfig returns the underlying rest.Config
+func (k *KubernetesClient) GetConfig() *rest.Config {
+	return k.config
+}
+
 // GetDynamicClient returns the underlying dynamic client
 func (k *KubernetesClient) GetDynamicClient() dynamic.Interface {
 	return k.dynamic

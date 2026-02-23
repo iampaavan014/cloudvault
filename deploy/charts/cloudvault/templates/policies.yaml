@@ -3,6 +3,7 @@ apiVersion: cloudvault.io/v1alpha1
 kind: CostPolicy
 metadata:
   name: global-budget
+  namespace: {{ .Release.Namespace }}
 spec:
   budget: {{ .Values.policies.budget.amount }}
   selector:
@@ -14,6 +15,7 @@ apiVersion: cloudvault.io/v1alpha1
 kind: StorageLifecyclePolicy
 metadata:
   name: default-governance
+  namespace: {{ .Release.Namespace }}
 spec:
   selector:
     matchNamespaces: {{ .Values.policies.lifecycle.namespaces | toJson }}

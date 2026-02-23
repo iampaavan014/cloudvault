@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-pod
+  namespace: cloudvault
+spec:
+  containers:
+  - name: debug-container
+    image: nicolaka/netshoot:latest
+    command: ["sleep", "infinity"]
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
