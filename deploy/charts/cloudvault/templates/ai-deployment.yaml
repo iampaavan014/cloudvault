@@ -27,23 +27,6 @@ spec:
             - name: http
               containerPort: 5005
               protocol: TCP
-          env:
-            - name: CLOUDVAULT_AI_URL
-              value: "http://{{ include "cloudvault.fullname" . }}-ai:{{ .Values.ai.service.port }}"
-          # --preload: torch imports once in master process, workers inherit — saves 15s per worker
-          # --timeout 120: prevents worker kill during slow inference on first request
-          args:
-            - "gunicorn"
-            - "--workers"
-            - "2"
-            - "--timeout"
-            - "120"
-            - "--preload"
-            - "--bind"
-            - "0.0.0.0:5005"
-            - "--access-logfile"
-            - "-"
-            - "inference_server:app"
           livenessProbe:
             httpGet:
               path: /health

@@ -21,7 +21,7 @@ func StartMockAIService(t *testing.T) *httptest.Server {
 			var reqBody struct {
 				History []float64 `json:"history"`
 			}
-			json.NewDecoder(r.Body).Decode(&reqBody)
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
 
 			prediction := 0.1 // Default growth
 			if len(reqBody.History) > 0 {

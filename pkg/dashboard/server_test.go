@@ -29,7 +29,8 @@ func TestHandlePVCs(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	var metrics []types.PVCMetric
-	json.Unmarshal(rr.Body.Bytes(), &metrics)
+	err := json.Unmarshal(rr.Body.Bytes(), &metrics)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, len(metrics))
 	assert.Equal(t, "pvc-1", metrics[0].Name)
 }
@@ -51,7 +52,8 @@ func TestHandleCost(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	var summary types.CostSummary
-	json.Unmarshal(rr.Body.Bytes(), &summary)
+	err := json.Unmarshal(rr.Body.Bytes(), &summary)
+	assert.NoError(t, err)
 	assert.Equal(t, 150.50, summary.TotalMonthlyCost)
 }
 
@@ -89,7 +91,8 @@ func TestHandleRecommendations(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	var recs []types.Recommendation
-	json.Unmarshal(rr.Body.Bytes(), &recs)
+	err := json.Unmarshal(rr.Body.Bytes(), &recs)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, len(recs))
 }
 

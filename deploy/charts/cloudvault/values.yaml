@@ -38,9 +38,9 @@ dashboard:
 ai:
   enabled: true
   replicaCount: 1
-  repository: cloudvault-ai
+  repository: cloudvault/ai
   tag: latest
-  pullPolicy: Never
+  pullPolicy: IfNotPresent
   service:
     type: ClusterIP
     port: 5005

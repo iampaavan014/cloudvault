@@ -48,6 +48,7 @@ LABEL org.opencontainers.image.title="CloudVault AI Service" \
 CMD ["gunicorn", \
     "--workers", "2", \
     "--timeout", "120", \
+    "--preload", \
     "--bind", "0.0.0.0:5005", \
     "--access-logfile", "-", \
     "--error-logfile", "-", \

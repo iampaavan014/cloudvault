@@ -21,6 +21,8 @@ GCFLAGS  :=
 # Tools
 GOLINT   := $(BUILD_DIR)/golangci-lint
 GOLINT_VERSION := v1.64.8
+KIND_CLUSTER   := kind-multi-node-cluster
+HELM_CHART     := ./deploy/charts/cloudvault
 
 # Help target - auto-documented
 help: ## Display this help message
@@ -126,3 +128,17 @@ version: ## Show version info
 	@echo "CloudVault $(VERSION)"
 	@echo "Commit: $(COMMIT)"
 	@echo "Date:   $(BUILD_DATE)"
+
+production-deploy: docker ## Build, containerize, and deploy to local kind cluster
+	@echo "🚀 Deploying $(PROJECT_NAME) to $(KIND_CLUSTER)..."
+	@kind load docker-image cloudvault/agent:$(VERSION) --name $(KIND_CLUSTER)
+	@kind load docker-image cloudvault/ai:$(VERSION) --name $(KIND_CLUSTER)
+	@echo "📦 Updating Helm dependencies..."
+	@helm dependency update $(HELM_CHART)
+	@echo "☸️ Installing Helm chart..."
+	@helm upgrade --install $(PROJECT_NAME) $(HELM_CHART) \
+		-n $(PROJECT_NAME) --create-namespace \
+		--set argo.enabled=true \
+		--set image.tag=$(VERSION) \
+		--set ai.tag=$(VERSION)
+	@echo "✅ Deployment initiated"
