@@ -24,14 +24,15 @@ spec:
         - name: agent
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["cloudvault-agent"]
+          command: ["/usr/local/bin/cloudvault-agent"]
           args:
             - "--interval={{ .Values.agent.interval }}"
             - "--timescale={{ .Values.agent.timescale_conn }}"
           securityContext:
             privileged: true
+            runAsUser: 0
             capabilities:
-              add: ["SYS_ADMIN", "NET_ADMIN"]
+              add: ["SYS_ADMIN", "NET_ADMIN", "NET_RAW", "SYS_RESOURCE"]
           volumeMounts:
             - name: bpf-maps
               mountPath: /sys/fs/bpf

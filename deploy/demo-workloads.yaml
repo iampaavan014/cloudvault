@@ -1,0 +1,178 @@
+---
+# CloudVault Demo Workloads
+# Creates real Pods that mount the demo PVCs so they bind (WaitForFirstConsumer)
+# and generate actual storage I/O for eBPF monitoring
+
+# ── Production: API Server ────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-api-server
+  namespace: production
+  labels:
+    app: api-server
+    cloudvault.io/monitored: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-server
+  template:
+    metadata:
+      labels:
+        app: api-server
+    spec:
+      containers:
+        - name: api-server
+          image: nginx:alpine
+          resources:
+            limits: { cpu: 100m, memory: 64Mi }
+            requests: { cpu: 50m, memory: 32Mi }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          # Continuously write to volume so eBPF sees I/O traffic
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh", "-c", "while true; do dd if=/dev/urandom of=/data/io-test bs=1M count=1 2>/dev/null; sleep 30; done &"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: api-data-pvc
+---
+# ── Production: DB Backup (zombie — pod exists but rarely touches volume) ─────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-db-backup
+  namespace: production
+  labels:
+    app: database
+    cloudvault.io/monitored: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: database
+  template:
+    metadata:
+      labels:
+        app: database
+    spec:
+      containers:
+        - name: db-backup
+          image: busybox:latest
+          command: ["/bin/sh", "-c", "sleep infinity"]
+          resources:
+            limits: { cpu: 50m, memory: 32Mi }
+            requests: { cpu: 10m, memory: 16Mi }
+          volumeMounts:
+            - name: backup
+              mountPath: /backup
+      volumes:
+        - name: backup
+          persistentVolumeClaim:
+            claimName: db-backup-pvc
+---
+# ── Staging: Cache ────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-cache
+  namespace: staging
+  labels:
+    app: cache
+    cloudvault.io/monitored: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cache
+  template:
+    metadata:
+      labels:
+        app: cache
+    spec:
+      containers:
+        - name: cache
+          image: busybox:latest
+          command: ["/bin/sh", "-c", "while true; do dd if=/dev/urandom of=/cache/data bs=512k count=1 2>/dev/null; sleep 20; done"]
+          resources:
+            limits: { cpu: 50m, memory: 32Mi }
+            requests: { cpu: 10m, memory: 16Mi }
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: cache-pvc
+---
+# ── Staging: App Logs ────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-logging
+  namespace: staging
+  labels:
+    app: logging
+    cloudvault.io/monitored: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logging
+  template:
+    metadata:
+      labels:
+        app: logging
+    spec:
+      containers:
+        - name: logging
+          image: busybox:latest
+          command: ["/bin/sh", "-c", "while true; do echo \"$(date) INFO log entry\" >> /logs/app.log; sleep 5; done"]
+          resources:
+            limits: { cpu: 50m, memory: 32Mi }
+            requests: { cpu: 10m, memory: 16Mi }
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: app-logs-pvc
+---
+# ── Analytics: ML Dataset ────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-ml-training
+  namespace: analytics
+  labels:
+    app: ml-training
+    cloudvault.io/monitored: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-training
+  template:
+    metadata:
+      labels:
+        app: ml-training
+    spec:
+      containers:
+        - name: ml-training
+          image: busybox:latest
+          command: ["/bin/sh", "-c", "while true; do dd if=/dev/urandom of=/dataset/batch-$(date +%s).bin bs=1M count=5 2>/dev/null; sleep 15; done"]
+          resources:
+            limits: { cpu: 100m, memory: 64Mi }
+            requests: { cpu: 50m, memory: 32Mi }
+          volumeMounts:
+            - name: dataset
+              mountPath: /dataset
+      volumes:
+        - name: dataset
+          persistentVolumeClaim:
+            claimName: ml-dataset-pvc

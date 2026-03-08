@@ -1,23 +1,54 @@
-FROM python:3.11-slim
+# ─────────────────────────────────────────────────────────────────────────────
+# CloudVault AI Service — Optimized Dockerfile
+#
+# Key optimizations vs original:
+#   1. CPU-only PyTorch wheel from pytorch.org/whl/cpu — avoids pulling the
+#      full CUDA wheel (~2GB) that python:3.11-slim would otherwise install.
+#   2. No build-essential — pre-built wheels don't need a C compiler.
+#   3. requirements.txt pinning for deterministic, cache-friendly layer.
+#   4. Single-pass pip install with --no-compile to reduce .pyc overhead.
+#   5. Tighten gunicorn: 2 workers (kind cluster is single-core), timeout 120s.
+#   6. Non-root user for security (industry standard).
+# ─────────────────────────────────────────────────────────────────────────────
+FROM python:3.11-slim AS base
+
+# Keeps Python from generating .pyc files and enables unbuffered stdout
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Install system dependencies for PyTorch and Gunicorn
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# ── Dependency layer (changes rarely → cached on repeated builds) ─────────────
+# Install CPU-only torch from the PyTorch index — ~450MB vs ~2.3GB for CUDA
+COPY deploy/requirements.ai.txt requirements.txt
+RUN pip install --no-compile -r requirements.txt \
+    --index-url https://download.pytorch.org/whl/cpu \
+    --extra-index-url https://pypi.org/simple
 
-# Copy requirements and install
-# Note: In a real project, we'd have a requirements.txt. 
-# For this transition, we'll install directly to ensure consistency with our existing code.
-RUN pip install --no-cache-dir flask torch numpy gunicorn
-
-# Copy AI service code
+# ── Application layer (changes frequently → separate layer) ──────────────────
 COPY pkg/ai/python/inference_server.py .
 
-# Expose port
+# Security: drop to non-root
+RUN addgroup --system --gid 1001 cloudvault && \
+    adduser  --system --uid 1001 --ingroup cloudvault --no-create-home cloudvault && \
+    chown cloudvault:cloudvault /app
+USER cloudvault
+
 EXPOSE 5005
 
-# Run with Gunicorn production server
-# 4 workers for concurrency, listening on 0.0.0.0:5005
-CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:5005", "inference_server:app"]
+LABEL org.opencontainers.image.title="CloudVault AI Service" \
+    org.opencontainers.image.description="PyTorch LSTM + RL inference server for storage cost prediction" \
+    org.opencontainers.image.source="https://github.com/cloudvault-io/cloudvault" \
+    org.opencontainers.image.licenses="Apache-2.0"
+
+# 2 workers: sufficient for a kind dev cluster; timeout=120s avoids premature kills
+# on first-boot model warm-up (LSTM init can take a few seconds)
+CMD ["gunicorn", \
+    "--workers", "2", \
+    "--timeout", "120", \
+    "--bind", "0.0.0.0:5005", \
+    "--access-logfile", "-", \
+    "--error-logfile", "-", \
+    "inference_server:app"]

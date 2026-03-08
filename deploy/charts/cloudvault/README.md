@@ -73,9 +73,9 @@ helm install cloudvault ./deploy/charts/cloudvault \
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `image.repository` | CloudVault image repository | `ghcr.io/iampaavan014/cloudvault` |
+| `image.repository` | CloudVault image repository | `cloudvault/agent` |
 | `image.tag` | CloudVault image tag | `latest` |
-| `image.pullPolicy` | Image pull policy | `Always` |
+| `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 
 ### Agent Configuration
 
@@ -106,6 +106,17 @@ helm install cloudvault ./deploy/charts/cloudvault \
 | `policies.lifecycle.tiers[0].storageClass` | First tier storage class | `sc1` |
 | `policies.lifecycle.tiers[0].duration` | First tier duration | `1h` |
 
+### AI Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `ai.enabled` | Enable AI inference service | `true` |
+| `ai.repository` | AI image repository | `cloudvault-ai` |
+| `ai.tag` | AI image tag | `latest` |
+| `ai.service.port` | AI service port | `5005` |
+| `ai.resources.limits.memory` | AI memory limit | `1Gi` |
+| `ai.resources.limits.cpu` | AI CPU limit | `500m` |
+
 ### Argo Workflows Configuration
 
 | Parameter | Description | Default |
@@ -130,6 +141,7 @@ kubectl get pods -n cloudvault
 # Expected output:
 # NAME                                    READY   STATUS    RESTARTS   AGE
 # cloudvault-agent-xxxxx                  1/1     Running   0          1m
+# cloudvault-ai-xxxxxxxxxx-xxxxx          1/1     Running   0          1m
 # cloudvault-dashboard-xxxxxxxxxx-xxxxx   1/1     Running   0          1m
 
 # Check Argo Workflows (if enabled)
@@ -182,8 +194,9 @@ kubectl delete namespace cloudvault
 
 Check pod logs:
 ```bash
-kubectl logs -n cloudvault -l app=cloudvault-agent
-kubectl logs -n cloudvault -l app=cloudvault-dashboard
+kubectl logs -n cloudvault -l app.kubernetes.io/component=agent
+kubectl logs -n cloudvault -l app.kubernetes.io/component=dashboard
+kubectl logs -n cloudvault -l app.kubernetes.io/component=ai
 ```
 
 ### Argo Workflows not executing

@@ -414,6 +414,70 @@ body::before {
   font-size: 0.875rem;
 }
 
+/* ── Per-service degradation pills ── */
+.svc-error-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-md);
+  color: #fcd34d;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.svc-error-pill:hover {
+  background: rgba(245, 158, 11, 0.22);
+}
+
+.svc-error-icon {
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+.svc-error-name {
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+.svc-info-btn {
+  font-size: 0.95rem;
+  opacity: 0.8;
+  margin-left: 2px;
+}
+
+.svc-error-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 260px;
+  max-width: 380px;
+  background: #1e293b;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  z-index: 200;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  line-height: 1.5;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.svc-error-tooltip strong {
+  color: #fcd34d;
+  display: block;
+  margin-bottom: 0.25rem;
+  text-transform: capitalize;
+}
+
 .header-actions {
   margin-left: auto;
   display: flex;

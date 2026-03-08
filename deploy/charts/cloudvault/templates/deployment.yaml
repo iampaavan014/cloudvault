@@ -7,6 +7,8 @@ metadata:
     app: cloudvault-dashboard
 spec:
   replicas: {{ .Values.dashboard.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: cloudvault-dashboard
@@ -17,14 +19,23 @@ spec:
       labels:
         app: cloudvault-dashboard
     spec:
+      hostPID: true
       serviceAccountName: {{ .Values.serviceAccount.name }}
       containers:
         - name: dashboard
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["cloudvault", "dashboard"]
+          command: ["/usr/local/bin/cloudvault", "dashboard"]
           ports:
             - containerPort: 8080
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            capabilities:
+              add: ["SYS_ADMIN", "NET_ADMIN", "NET_RAW", "SYS_RESOURCE"]
+          volumeMounts:
+            - name: bpf-maps
+              mountPath: /sys/fs/bpf
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
           env:
@@ -40,3 +51,8 @@ spec:
               value: "cloudvault-secret"
             - name: CLOUDVAULT_AI_URL
               value: "http://{{ include "cloudvault.fullname" . }}-ai.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.ai.service.port }}"
+      volumes:
+        - name: bpf-maps
+          hostPath:
+            path: /sys/fs/bpf
+            type: Directory

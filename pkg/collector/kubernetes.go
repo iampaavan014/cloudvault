@@ -1,8 +1,14 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/cloudvault-io/cloudvault/pkg/types"
 
@@ -16,6 +22,10 @@ import (
 
 	"github.com/cloudvault-io/cloudvault/pkg/types/apis/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/informers"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 // KubernetesClient wraps the Kubernetes clientset with CloudVault-specific logic
@@ -23,6 +33,14 @@ type KubernetesClient struct {
 	clientset *kubernetes.Clientset
 	dynamic   dynamic.Interface
 	config    *rest.Config
+	factory   informers.SharedInformerFactory
+	podLister corelisters.PodLister
+	podSynced cache.InformerSynced
+
+	// Cache for cluster info
+	clusterInfo      *types.ClusterInfo
+	clusterInfoMu    sync.RWMutex
+	clusterInfoValid time.Time
 }
 
 // NewKubernetesClient creates a new Kubernetes client
@@ -45,6 +63,10 @@ func NewKubernetesClient(kubeconfig string) (*KubernetesClient, error) {
 		}
 	}
 
+	// Increase QPS and Burst to avoid throttling during discovery and high-load periods
+	config.QPS = 25
+	config.Burst = 50
+
 	// Create clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -57,15 +79,48 @@ func NewKubernetesClient(kubeconfig string) (*KubernetesClient, error) {
 		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
+	// Initialize Informer Factory
+	factory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
+	podInformer := factory.Core().V1().Pods()
+
 	return &KubernetesClient{
 		clientset: clientset,
 		dynamic:   dynClient,
 		config:    config,
+		factory:   factory,
+		podLister: podInformer.Lister(),
+		podSynced: podInformer.Informer().HasSynced,
 	}, nil
+}
+
+// StartInformers starts the background caching workers.
+func (k *KubernetesClient) StartInformers(ctx context.Context) {
+	k.factory.Start(ctx.Done())
+	slog.Info("Kubernetes informers started")
+	if !cache.WaitForCacheSync(ctx.Done(), k.podSynced) {
+		slog.Error("Failed to sync Kubernetes pod cache")
+	} else {
+		slog.Info("Kubernetes pod cache synced")
+	}
 }
 
 // GetClusterInfo retrieves cluster metadata including cloud provider detection
 func (k *KubernetesClient) GetClusterInfo(ctx context.Context) (*types.ClusterInfo, error) {
+	k.clusterInfoMu.RLock()
+	if k.clusterInfo != nil && time.Since(k.clusterInfoValid) < 5*time.Minute {
+		defer k.clusterInfoMu.RUnlock()
+		return k.clusterInfo, nil
+	}
+	k.clusterInfoMu.RUnlock()
+
+	k.clusterInfoMu.Lock()
+	defer k.clusterInfoMu.Unlock()
+
+	// Double check under lock
+	if k.clusterInfo != nil && time.Since(k.clusterInfoValid) < 5*time.Minute {
+		return k.clusterInfo, nil
+	}
+
 	// Get Kubernetes version
 	version, err := k.clientset.Discovery().ServerVersion()
 	if err != nil {
@@ -101,13 +156,16 @@ func (k *KubernetesClient) GetClusterInfo(ctx context.Context) (*types.ClusterIn
 	// Create cluster ID
 	clusterID := fmt.Sprintf("%s-%s-%s", provider, region, clusterName)
 
-	return &types.ClusterInfo{
+	k.clusterInfo = &types.ClusterInfo{
 		ID:       clusterID,
 		Name:     clusterName,
 		Provider: provider,
 		Region:   region,
 		Version:  version.GitVersion,
-	}, nil
+	}
+	k.clusterInfoValid = time.Now()
+
+	return k.clusterInfo, nil
 }
 
 // detectCloudProvider attempts to determine the cloud provider and region
@@ -243,11 +301,79 @@ func (k *KubernetesClient) ListCostPolicies(ctx context.Context) ([]v1alpha1.Cos
 	return policies, nil
 }
 
-// ListPods fetches all pods across all namespaces
-func (k *KubernetesClient) ListPods(ctx context.Context) (*corev1.PodList, error) {
-	pods, err := k.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+// ListPodsByLabel fetches pods matching a label selector, preferably from cache
+func (k *KubernetesClient) ListPodsByLabel(ctx context.Context, namespace, labelSelector string) ([]*corev1.Pod, error) {
+	// Try to use the lister if synced
+	if k.podLister != nil {
+		selector, err := metav1.ParseToLabelSelector(labelSelector)
+		if err == nil {
+			s, err := metav1.LabelSelectorAsSelector(selector)
+			if err == nil {
+				return k.podLister.Pods(namespace).List(s)
+			}
+		}
+	}
+
+	// Fallback to direct API call if cache is not available or parsing fails
+	list, err := k.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list pods: %w", err)
+		return nil, err
+	}
+
+	var pods []*corev1.Pod
+	for i := range list.Items {
+		pods = append(pods, &list.Items[i])
 	}
 	return pods, nil
+}
+
+// ListPods fetches all pods across all namespaces
+func (k *KubernetesClient) ListPods(ctx context.Context) (*corev1.PodList, error) {
+	return k.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+}
+
+// GetPodVolumeUsedBytes tries to determine volume usage safely bypassing prometheus dependencies
+func (k *KubernetesClient) GetPodVolumeUsedBytes(namespace, podName, mountPath string) (int64, error) {
+	req := k.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		Param("container", "").
+		Param("command", "du").
+		Param("command", "-sb").
+		Param("command", mountPath).
+		Param("stdin", "false").
+		Param("stdout", "true").
+		Param("stderr", "false").
+		Param("tty", "false")
+
+	exec, err := remotecommand.NewSPDYExecutor(k.config, "POST", req.URL())
+	if err != nil {
+		return 0, err
+	}
+
+	var stdout bytes.Buffer
+	err = exec.StreamWithContext(context.Background(), remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Tty:    false,
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	outStr := strings.TrimSpace(stdout.String())
+	lines := strings.Split(outStr, "\n")
+	if len(lines) > 0 {
+		fields := strings.Fields(lines[len(lines)-1])
+		if len(fields) >= 1 {
+			bytesVal, err := strconv.ParseInt(fields[0], 10, 64)
+			if err == nil {
+				return bytesVal, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("could not parse used bytes from output: %s", outStr)
 }

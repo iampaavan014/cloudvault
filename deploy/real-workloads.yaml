@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: analytics
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+---
+# Analytics Workload (Consumes PVC and generates Egress to 8.8.8.8)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-worker
+  namespace: analytics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-worker
+  template:
+    metadata:
+      labels:
+        app: ml-worker
+    spec:
+      containers:
+      - name: worker
+        image: ubuntu:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl iputils-ping
+          # Generate 800MB of real data on the 5Gi PVC (16% usage - oversized)
+          dd if=/dev/urandom of=/data/dataset.bin bs=1M count=800 || true
+          # Infinite loop to generate egress traffic
+          while true; do
+            curl -s https://example.com > /dev/null
+            ping -c 5 8.8.8.8 > /dev/null
+            sleep 5
+          done
+        volumeMounts:
+        - name: data-vol
+          mountPath: /data
+      volumes:
+      - name: data-vol
+        persistentVolumeClaim:
+          claimName: ml-dataset-pvc
+---
+# Production Workload (Consumes very little PVC to appear as a 'zombie')
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-backup-worker
+  namespace: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db-backup-worker
+  template:
+    metadata:
+      labels:
+        app: db-backup-worker
+    spec:
+      containers:
+      - name: worker
+        image: ubuntu:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Only write 1MB of data (tiny usage)
+          dd if=/dev/urandom of=/data/backup.txt bs=1M count=1 || true
+          # Minimal egress
+          while true; do
+            sleep 60
+          done
+        volumeMounts:
+        - name: backup-vol
+          mountPath: /data
+      volumes:
+      - name: backup-vol
+        persistentVolumeClaim:
+          claimName: db-backup-pvc
+---
+# Production Active Workload (High network egress, moderate PVC)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+  namespace: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-server
+  template:
+    metadata:
+      labels:
+        app: api-server
+    spec:
+      containers:
+      - name: worker
+        image: ubuntu:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          # Write 1.8GB to 2Gi PVC (90% usage - healthy)
+          dd if=/dev/urandom of=/data/db.bin bs=1M count=1800 || true
+          while true; do
+            curl -s https://cloudflare.com > /dev/null
+            sleep 2
+          done
+        volumeMounts:
+        - name: api-vol
+          mountPath: /data
+      volumes:
+      - name: api-vol
+        persistentVolumeClaim:
+          claimName: api-data-pvc

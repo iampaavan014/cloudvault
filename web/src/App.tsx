@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { LayoutDashboard, Wallet, AlertCircle, ArrowUpRight, Search, RefreshCw, Download, Filter, Check, Menu, Database, BarChart3, Settings, ShieldCheck, Zap, Target, Layers, HardDrive } from 'lucide-react';
+import { LayoutDashboard, Wallet, AlertCircle, ArrowUpRight, Search, RefreshCw, Download, Filter, Check, Menu, Database, BarChart3, Settings, ShieldCheck, Zap, Target, Layers, HardDrive, Info } from 'lucide-react';
 import './App.css';
 
 // Types matching Go backend
@@ -37,18 +37,31 @@ interface StorageLifecyclePolicy {
 
 type View = 'overview' | 'cost' | 'recommendations' | 'governance' | 'settings';
 
+// Per-service error tracking: { serviceName: errorMessage | null }
+type ServiceErrors = Record<string, string | null>;
+
 function App() {
   // Data state
   const [costData, setCostData] = useState<CostSummary | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [policies, setPolicies] = useState<StorageLifecyclePolicy[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [networkData, setNetworkData] = useState<Record<string, Record<string, number>>>({});
-  const [aiMetrics, setAiMetrics] = useState({ accuracy: 0.992, latency: 45, status: true }); // ms
+  const [aiMetrics, setAiMetrics] = useState({ accuracy: 0.992, latency: 45, status: true });
   const [healthData, setHealthData] = useState<any>(null);
   const [monitoredPVCs, setMonitoredPVCs] = useState<any[]>([]);
+  const [governanceStatus, setGovernanceStatus] = useState<any>(null);
+  const [budgetLimit, setBudgetLimit] = useState<number>(1000);
+  const [budgetInput, setBudgetInput] = useState<string>('1000');
+  const [budgetSaving, setBudgetSaving] = useState(false);
+  // Per-service error state — null means healthy
+  const [serviceErrors, setServiceErrors] = useState<ServiceErrors>({
+    cost: null, recommendations: null, policies: null,
+    network: null, ai: null, health: null, pvc: null,
+  });
+  // Which info tooltip is open
+  const [openTooltip, setOpenTooltip] = useState<string | null>(null);
 
   // Navigation state
   const [currentView, setCurrentView] = useState<View>('overview');
@@ -68,13 +81,31 @@ function App() {
 
   const [applyingIndex, setApplyingIndex] = useState<number | null>(null);
   const [successIndex, setSuccessIndex] = useState<number | null>(null);
+  const [applyInfo, setApplyInfo] = useState<Record<number, string>>({});
+  const [budgetSaved, setBudgetSaved] = useState(false);
   const [selectedNamespace, setSelectedNamespace] = useState<string | null>(null);
   const [selectedStorageClass, setSelectedStorageClass] = useState<string | null>(null);
 
   // Auth state
   const [token, setToken] = useState<string | null>(null);
 
-  // Login function (Phase 16 Auth)
+  // Helper: safely fetch one API and return [data | null, errorMsg | null]
+  const safeFetch = useCallback(async (url: string, headers: Record<string, string>) => {
+    try {
+      const res = await fetch(url, { headers });
+      if (res.status === 401) {
+        setToken(null);
+        return [null, `401 Unauthorized — token expired`] as const;
+      }
+      if (!res.ok) return [null, `HTTP ${res.status} ${res.statusText}`] as const;
+      const data = await res.json();
+      return [data, null] as const;
+    } catch (e: any) {
+      return [null, e?.message ?? 'Network error — service unreachable'] as const;
+    }
+  }, []);
+
+  // Login — always attempts, never blocks rendering on failure
   const login = useCallback(async () => {
     try {
       const res = await fetch('/api/login', {
@@ -82,68 +113,76 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'admin', password: 'cloudvault-secret' })
       });
-      if (!res.ok) throw new Error('Login failed');
+      if (!res.ok) return null;
       const data = await res.json();
       setToken(data.token);
-      return data.token;
-    } catch (err) {
-      console.error("Auth failed:", err);
-      // Fallback for dev/mock mode if backend is not ready
+      return data.token as string;
+    } catch {
       return null;
     }
   }, []);
 
-  // Fetch data function
+  // Resilient fetch — each service is independent; partial failures never block the UI
   const fetchData = useCallback(async () => {
-    try {
-      // Ensure we have a token
-      let currentToken = token;
-      if (!currentToken) {
-        currentToken = await login();
-        if (!currentToken) return; // Stop if auth fails
-      }
-
-      const headers = { 'Authorization': `Bearer ${currentToken}` };
-
-      const [costRes, recRes, polRes, netRes, aiRes, healthRes, pvcRes] = await Promise.all([
-        fetch('/api/cost', { headers }),
-        fetch('/api/recommendations', { headers }),
-        fetch('/api/policies', { headers }),
-        fetch('/api/network', { headers }),
-        fetch('/api/ai-metrics', { headers }),
-        fetch('/health', { headers }),
-        fetch('/api/pvc', { headers })
-      ]);
-
-      if (!costRes.ok || !recRes.ok || !polRes.ok || !netRes.ok || !aiRes.ok || !healthRes.ok || !pvcRes.ok) {
-        if (costRes.status === 401 || recRes.status === 401) setToken(null);
-        throw new Error('Failed to fetch data');
-      }
-
-      const costJson = await costRes.json();
-      const recJson = await recRes.json();
-      const polJson = await polRes.json();
-      const netJson = await netRes.json();
-      const aiJson = await aiRes.json();
-      const healthJson = await healthRes.json();
-      const pvcJson = await pvcRes.json();
-
-      setCostData(costJson);
-      setRecommendations(recJson || []);
-      setPolicies(polJson || []);
-      setNetworkData(netJson || {});
-      setAiMetrics(aiJson);
-      setHealthData(healthJson);
-      setMonitoredPVCs(pvcJson || []);
-      setLastUpdated(new Date());
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-      console.error("API error while fetching dashboard data:", err);
-    } finally {
-      setLoading(false);
+    // Try to get/refresh token; if auth backend is down, proceed anyway with null token
+    let currentToken = token;
+    if (!currentToken) {
+      currentToken = await login();
     }
-  }, [token, login]);
+    const headers: Record<string, string> = currentToken
+      ? { 'Authorization': `Bearer ${currentToken}` }
+      : {};
+
+    // Fire all fetches concurrently — Promise.allSettled guarantees EVERY result
+    const [costR, recR, polR, netR, aiR, healthR, pvcR, govR, budgetR] = await Promise.allSettled([
+      safeFetch('/api/cost', headers),
+      safeFetch('/api/recommendations', headers),
+      safeFetch('/api/policies', headers),
+      safeFetch('/api/network', headers),
+      safeFetch('/api/ai-metrics', headers),
+      safeFetch('/health', {}),          // health is public — no token needed
+      safeFetch('/api/pvc', headers),
+      safeFetch('/api/governance/status', headers),
+      safeFetch('/api/budget', headers),
+    ]);
+
+    // Utility to unwrap allSettled result into [data, err]
+    const unwrap = (r: PromiseSettledResult<readonly [any, string | null]>) =>
+      r.status === 'fulfilled' ? r.value : ([null, String((r as PromiseRejectedResult).reason)] as const);
+
+    const [cost, costErr] = unwrap(costR);
+    const [rec, recErr] = unwrap(recR);
+    const [pol, polErr] = unwrap(polR);
+    const [net, netErr] = unwrap(netR);
+    const [ai, aiErr] = unwrap(aiR);
+    const [hlth, healthErr] = unwrap(healthR);
+    const [pvc, pvcErr] = unwrap(pvcR);
+    const [gov] = unwrap(govR);
+    const [budget] = unwrap(budgetR);
+
+    // Update per-service error map
+    setServiceErrors({
+      cost: costErr, recommendations: recErr, policies: polErr,
+      network: netErr, ai: aiErr, health: healthErr, pvc: pvcErr,
+    });
+
+    // Apply whatever succeeded — stale data stays until new data arrives
+    if (cost) setCostData(cost);
+    if (rec) setRecommendations(rec || []);
+    if (pol) setPolicies(pol || []);
+    if (net) setNetworkData(net || {});
+    if (ai) setAiMetrics(ai);
+    if (hlth) setHealthData(hlth);
+    if (pvc) setMonitoredPVCs(pvc || []);
+    if (gov) setGovernanceStatus(gov);
+    if (budget && budget.limit) {
+      setBudgetLimit(budget.limit);
+      setBudgetInput(String(budget.limit));
+    }
+
+    setLastUpdated(new Date());
+    setLoading(false);
+  }, [token, login, safeFetch]);
 
   // Initial load
   useEffect(() => {
@@ -285,13 +324,31 @@ function App() {
         })
       });
 
-      if (!res.ok) throw new Error('Failed to apply recommendation');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.message || 'Failed to apply recommendation');
+      }
+
+      const data = await res.json();
+
+      // Show info note if present (e.g., k8s doesn't support PVC downsizing)
+      if (data.info) {
+        setApplyInfo(prev => ({ ...prev, [index]: data.info }));
+      }
 
       setSuccessIndex(index);
+
+      // Remove the recommendation from the local list immediately
+      setRecommendations(prev => prev.filter((_, i) => i !== index));
+
       setTimeout(() => {
         setSuccessIndex(null);
-        fetchData(); // Refresh data to show applied changes
-      }, 3000);
+        setApplyInfo(prev => {
+          const next = { ...prev };
+          delete next[index];
+          return next;
+        });
+      }, 5000);
     } catch (err) {
       console.error("Failed to apply:", err);
       alert("Error: " + (err instanceof Error ? err.message : "Failed to apply fix"));
@@ -310,8 +367,10 @@ function App() {
   };
 
 
+  // Count degraded services for header badge
+  const degradedServices = Object.entries(serviceErrors).filter(([, e]) => e !== null);
+
   if (loading) return <div className="loading">Loading CloudVault Dashboard...</div>;
-  if (error && !costData) return <div className="error">Error: {error}</div>;
 
   // Transform data for Recharts
   const namespaceData = costData ? Object.entries(costData.by_namespace).map(([name, value]) => ({ name, value })) : [];
@@ -392,6 +451,19 @@ function App() {
               <div key={idx} className="alert-banner">
                 <AlertCircle size={14} />
                 <span>{alert}</span>
+              </div>
+            ))}
+            {/* Per-service degradation pills — UI stays up, shows which backend is failing */}
+            {degradedServices.map(([svc, errMsg]) => (
+              <div key={svc} className="svc-error-pill" onClick={() => setOpenTooltip(openTooltip === svc ? null : svc)}>
+                <AlertCircle size={12} className="svc-error-icon" />
+                <span className="svc-error-name">{svc}</span>
+                <span className="svc-info-btn" title={errMsg ?? ''}>ⓘ</span>
+                {openTooltip === svc && (
+                  <div className="svc-error-tooltip">
+                    <strong>{svc}</strong> — {errMsg}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -572,29 +644,38 @@ function App() {
                 <div className="card glass-card live-metrics-card">
                   <div className="card-header">
                     <BarChart3 size={20} className="icon-green" />
-                    <h3>Live Metrics (Throughput)</h3>
+                    <h3>Live Network I/O</h3>
                     <button className="tile-refresh" onClick={fetchData}><RefreshCw size={14} /></button>
                   </div>
-                  <div className="metrics-summary">
-                    <div className="metric-item">
-                      <span className="label">Peak Throughput</span>
-                      <span className="value">124 MB/s</span>
-                    </div>
-                    <div className="metric-item">
-                      <span className="label">Active IOPS</span>
-                      <span className="value">1,240</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    // Compute real totals from eBPF networkData
+                    let totalBytes = 0;
+                    const entries = Object.entries(networkData);
+                    entries.forEach(([, dests]) => {
+                      Object.values(dests).forEach(b => { totalBytes += b; });
+                    });
+                    const totalMB = (totalBytes / (1024 * 1024)).toFixed(2);
+                    const flowCount = entries.length;
+                    return (
+                      <div className="metrics-summary">
+                        <div className="metric-item">
+                          <span className="label">Total Egress</span>
+                          <span className="value">{totalMB} MB</span>
+                        </div>
+                        <div className="metric-item">
+                          <span className="label">Active Flows</span>
+                          <span className="value">{flowCount > 0 ? flowCount : '—'}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="chart-container-mini">
                     <ResponsiveContainer width="100%" height={150}>
                       <BarChart data={Object.entries(networkData).length > 0 ?
                         Object.entries(networkData).slice(0, 6).map(([node, dests]) => ({
                           t: node.split('.').slice(-2).join('.'),
                           v: Object.values(dests)[0] / (1024 * 1024)
-                        })) : [
-                          { t: '1s', v: 45 }, { t: '2s', v: 52 }, { t: '3s', v: 48 },
-                          { t: '4s', v: 70 }, { t: '5s', v: 65 }, { t: '6s', v: 58 }
-                        ]}>
+                        })) : []}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
                         <XAxis dataKey="t" hide />
                         <YAxis hide />
@@ -859,7 +940,7 @@ function App() {
 
                       <div className="policy-footer-stats">
                         <div className="footer-stat">
-                          <div className="stat-value">{policy.status?.managedPVCs || 0}</div>
+                          <div className="stat-value">{governanceStatus?.managed_pvcs || 0}</div>
                           <div className="stat-label">MANAGED VOLUMES</div>
                         </div>
                         <div className="footer-stat">
@@ -867,7 +948,7 @@ function App() {
                           <div className="stat-label">POLICY STATUS</div>
                         </div>
                         <div className="footer-stat">
-                          <div className="stat-value">JUST NOW</div>
+                          <div className="stat-value">{governanceStatus?.last_reconcile ? new Date(governanceStatus.last_reconcile).toLocaleTimeString() : 'N/A'}</div>
                           <div className="stat-label">LAST RECONCILE</div>
                         </div>
                       </div>
@@ -891,6 +972,31 @@ spec:
                   </div>
                 )}
               </div>
+
+              {/* Autonomous Action History */}
+              {governanceStatus?.autonomous_actions?.length > 0 && (
+                <section className="card glass" style={{ marginTop: '1.5rem' }}>
+                  <h3 style={{ marginBottom: '1rem' }}>⚡ Autonomous Actions</h3>
+                  <table className="cost-table" style={{ width: '100%' }}>
+                    <thead><tr>
+                      <th>Time</th><th>PVC</th><th>Namespace</th><th>Action</th><th>From</th><th>To</th><th>Status</th>
+                    </tr></thead>
+                    <tbody>
+                      {governanceStatus.autonomous_actions.map((a: any, i: number) => (
+                        <tr key={i}>
+                          <td>{new Date(a.timestamp).toLocaleString()}</td>
+                          <td>{a.pvc}</td>
+                          <td><span className="badge-pill namespace">{a.namespace}</span></td>
+                          <td>{a.action}</td>
+                          <td>{a.from_tier}</td>
+                          <td>{a.to_tier}</td>
+                          <td><span className={`badge-pill ${a.status === 'completed' ? 'scope-global' : 'label'}`}>{a.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              )}
             </div>
           )}
           {currentView === 'recommendations' && (
@@ -982,6 +1088,12 @@ spec:
                             {applyingIndex === idx ? 'Applying...' :
                               successIndex === idx ? 'Done!' : 'Apply Fix'}
                           </button>
+                          {applyInfo[idx] && (
+                            <div className="apply-info-note" style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem', marginTop: '0.5rem', padding: '0.5rem', borderRadius: '0.4rem', background: 'rgba(255,187,40,0.12)', border: '1px solid rgba(255,187,40,0.3)', fontSize: '0.78rem', color: '#e8d49c' }}>
+                              <Info size={14} style={{ flexShrink: 0, marginTop: '1px' }} />
+                              <span>{applyInfo[idx]}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1018,6 +1130,54 @@ spec:
                         <option value={300}>5m</option>
                       </select>
                     )}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-info">
+                    <label>Budget Limit</label>
+                    <p>Monthly storage cost alert threshold</p>
+                  </div>
+                  <div className="settings-controls" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '1rem' }}>$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={budgetInput}
+                      onChange={(e) => setBudgetInput(e.target.value)}
+                      className="minimal-select"
+                      style={{ width: '100px' }}
+                    />
+                    <button
+                      className={`apply-btn-primary ${budgetSaving ? 'loading' : ''} ${budgetSaved ? 'success' : ''}`}
+                      disabled={budgetSaving}
+                      onClick={async () => {
+                        const v = parseFloat(budgetInput);
+                        if (isNaN(v) || v <= 0) return;
+                        setBudgetSaving(true);
+                        setBudgetSaved(false);
+                        try {
+                          const res = await fetch('/api/budget', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ limit: v })
+                          });
+                          if (!res.ok) throw new Error('Failed to save');
+                          setBudgetLimit(v);
+                          setBudgetSaved(true);
+                          fetchData(); // Refresh cost data to reflect new limit
+                          setTimeout(() => setBudgetSaved(false), 3000);
+                        } catch (err) {
+                          alert('Failed to save budget: ' + (err instanceof Error ? err.message : 'Unknown error'));
+                        } finally { setBudgetSaving(false); }
+                      }}
+                    >
+                      {budgetSaving ? <RefreshCw className="spin" size={14} /> : budgetSaved ? <><Check size={14} /> Saved</> : 'Save'}
+                    </button>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Current: ${budgetLimit.toLocaleString()}
+                    </span>
                   </div>
                 </div>
 

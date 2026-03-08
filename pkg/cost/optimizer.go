@@ -270,11 +270,21 @@ func (o *Optimizer) checkOversizedVolume(m *types.PVCMetric) *types.Recommendati
 
 	utilizationPercent := m.UsagePercent()
 
-	// If using less than 20% of allocated space for volumes > 50GB
-	if utilizationPercent < 20 && m.SizeGB() > 50 {
+	// If using less than 20% of allocated space for volumes > 1GB
+	// Skip if already migrated by CloudVault or already at minimum 1GB
+	if m.Annotations != nil && m.Annotations["cloudvault.io/migrated-from"] != "" {
+		return nil
+	}
+
+	if utilizationPercent < 20 && m.SizeGB() > 1.1 { // Allow some slack for 1Gi volumes
 		recommendedSizeGB := m.UsedGB() * 1.5 // 50% buffer
-		if recommendedSizeGB < 10 {
-			recommendedSizeGB = 10 // Minimum 10GB
+		if recommendedSizeGB < 1 {
+			recommendedSizeGB = 1 // Minimum 1GB
+		}
+
+		// Don't recommend if the savings are negligible (less than 10% reduction)
+		if recommendedSizeGB >= m.SizeGB()*0.9 {
+			return nil
 		}
 
 		currentCost := m.MonthlyCost
@@ -285,10 +295,10 @@ func (o *Optimizer) checkOversizedVolume(m *types.PVCMetric) *types.Recommendati
 			Type:             "resize",
 			PVC:              m.Name,
 			Namespace:        m.Namespace,
-			CurrentState:     fmt.Sprintf("%.0fGB (%.1f%% used)", m.SizeGB(), utilizationPercent),
-			RecommendedState: fmt.Sprintf("%.0fGB", recommendedSizeGB),
+			CurrentState:     fmt.Sprintf("%.0fGi (%.1f%% used)", m.SizeGB(), utilizationPercent),
+			RecommendedState: fmt.Sprintf("%.0fGi", recommendedSizeGB),
 			MonthlySavings:   savings,
-			Reasoning:        fmt.Sprintf("Volume is only %.1f%% utilized. Consider resizing to %.0fGB.", utilizationPercent, recommendedSizeGB),
+			Reasoning:        fmt.Sprintf("Volume is only %.1f%% utilized. Consider resizing to %.0fGi.", utilizationPercent, recommendedSizeGB),
 			Impact:           "medium",
 		}
 	}

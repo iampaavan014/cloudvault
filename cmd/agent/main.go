@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -137,9 +138,24 @@ func main() {
 	} else {
 		slog.Info("eBPF kernel monitoring enabled")
 		defer func() { _ = ebpfAgent.Close() }()
-		// Attach to default interface if possible
-		if _, err := ebpfAgent.AttachToInterface("eth0"); err != nil {
-			slog.Warn("Failed to attach eBPF to eth0", "error", err)
+		// Attach to the first non-loopback UP interface
+		attached := false
+		if ifaces, ierr := net.Interfaces(); ierr == nil {
+			for _, iface := range ifaces {
+				if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+					continue
+				}
+				if _, aerr := ebpfAgent.AttachToInterface(iface.Name); aerr == nil {
+					slog.Info("eBPF attached to interface", "iface", iface.Name)
+					attached = true
+					break
+				} else {
+					slog.Debug("failed to attach eBPF to interface", "iface", iface.Name, "error", aerr)
+				}
+			}
+		}
+		if !attached {
+			slog.Warn("Could not attach eBPF to any interface")
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/cloudvault-io/cloudvault/pkg/integrations"
 	"github.com/cloudvault-io/cloudvault/pkg/types"
@@ -133,11 +134,50 @@ func (c *PVCCollector) CollectAll(ctx context.Context) ([]types.PVCMetric, error
 				}
 
 				// Apply Prometheus data from batch if available
-				if batchMetrics != nil {
-					if nsMetrics, ok := batchMetrics[pvc.Namespace]; ok {
-						if m, ok := nsMetrics[pvc.Name]; ok {
-							metric.UsedBytes = m.UsedBytes
-							metric.LastAccessedAt = m.LastActivity
+				if batchMetrics != nil && batchMetrics[pvc.Namespace] != nil && batchMetrics[pvc.Namespace][pvc.Name] != nil {
+					metric.UsedBytes = batchMetrics[pvc.Namespace][pvc.Name].UsedBytes
+					metric.LastAccessedAt = batchMetrics[pvc.Namespace][pvc.Name].LastActivity
+				}
+
+				slog.Info("PVC Check", "name", pvc.Name, "size", metric.SizeBytes, "mounted", len(metric.MountedPods), "prometheusUsed", metric.UsedBytes)
+
+				// Fallback for missing prometheus metrics by executing exactly against pods
+				if metric.UsedBytes == 0 && metric.SizeBytes > 0 && len(metric.MountedPods) > 0 {
+					for _, podName := range metric.MountedPods {
+						pod, err := c.client.GetClientset().CoreV1().Pods(pvc.Namespace).Get(ctx, podName, metav1.GetOptions{})
+						if err == nil && pod.Status.Phase == corev1.PodRunning {
+							// Find the mount path
+							mountPath := ""
+							for _, vol := range pod.Spec.Volumes {
+								if vol.PersistentVolumeClaim != nil && vol.PersistentVolumeClaim.ClaimName == pvc.Name {
+									for _, container := range pod.Spec.Containers {
+										for _, mount := range container.VolumeMounts {
+											if mount.Name == vol.Name {
+												mountPath = mount.MountPath
+												break
+											}
+										}
+										if mountPath != "" {
+											break
+										}
+									}
+								}
+								if mountPath != "" {
+									break
+								}
+							}
+							if mountPath != "" {
+								slog.Info("Attempting GetPodVolumeUsedBytes fallback", "pvc", pvc.Name, "pod", podName, "mount", mountPath)
+								used, err := c.client.GetPodVolumeUsedBytes(pvc.Namespace, podName, mountPath)
+								if err == nil && used > 0 {
+									metric.UsedBytes = used
+									metric.LastAccessedAt = time.Now()
+									slog.Info("Successfully gathered fallback usedBytes", "pvc", pvc.Name, "used", used)
+									break
+								} else {
+									slog.Warn("Fallback GetPodVolumeUsedBytes failed", "pvc", pvc.Name, "error", err)
+								}
+							}
 						}
 					}
 				}

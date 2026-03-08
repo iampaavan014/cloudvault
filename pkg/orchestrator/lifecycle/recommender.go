@@ -97,6 +97,9 @@ func (r *IntelligentRecommender) Recommend(pvc types.PVCMetric, policy *v1alpha1
 		if h, err := r.tsdb.GetHistory(context.Background(), pvc.Namespace, pvc.Name, 30*24*time.Hour); err == nil && len(h) > 0 {
 			history = h
 			usageRatio = h[len(h)-1] // Use latest from history
+		} else {
+			// No history available yet, use current live usage
+			history = []float64{usageRatio}
 		}
 	}
 
@@ -112,7 +115,7 @@ func (r *IntelligentRecommender) Recommend(pvc types.PVCMetric, policy *v1alpha1
 	}
 
 	// 4. Right-Sizing Analysis
-	if usageRatio < 0.3 && pvc.SizeBytes > 10*1024*1024*1024 { // > 10GB and < 30% utilized
+	if usageRatio < 0.6 && pvc.SizeBytes > 1*1024*1024*1024 { // > 1GB and < 60% utilized
 		suggestedSize := int64(float64(pvc.UsedBytes) * 1.5)
 
 		// Ensure a minimum size floor of 1GB for valid provisioning
@@ -125,7 +128,7 @@ func (r *IntelligentRecommender) Recommend(pvc types.PVCMetric, policy *v1alpha1
 			TargetClass: pvc.StorageClass,
 			TargetTier:  "hot",
 			TargetSize:  FormatQuantity(suggestedSize),
-			Reason:      "Right-sizing: Workload is over-provisioned (under 30% utilization)",
+			Reason:      "Right-sizing: Workload is over-provisioned (under 60% utilization)",
 			Confidence:  0.85,
 		}
 	}

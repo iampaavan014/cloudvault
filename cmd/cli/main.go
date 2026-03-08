@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"text/tabwriter"
 
@@ -491,9 +492,24 @@ func handleDashboardCommand(kubeconfig string, promURL *string, port *int, mock 
 			fmt.Fprintf(os.Stderr, "⚠️  Warning: Failed to initialize eBPF agent: %v\n", err)
 		} else {
 			fmt.Println("🧬 eBPF kernel monitoring enabled")
-			// Try to attach to eth0
-			if _, err := ebpfAgent.AttachToInterface("eth0"); err != nil {
-				fmt.Fprintf(os.Stderr, "⚠️  Warning: Failed to attach eBPF to eth0: %v\n", err)
+			// Auto-detect network interfaces and attach to the first non-loopback one
+			attached := false
+			if ifaces, ierr := net.Interfaces(); ierr == nil {
+				for _, iface := range ifaces {
+					if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+						continue
+					}
+					if _, aerr := ebpfAgent.AttachToInterface(iface.Name); aerr == nil {
+						fmt.Printf("🔗 eBPF attached to interface: %s\n", iface.Name)
+						attached = true
+						break
+					} else {
+						fmt.Printf("debug: failed to attach to %s: %v\n", iface.Name, aerr)
+					}
+				}
+			}
+			if !attached {
+				fmt.Fprintf(os.Stderr, "⚠️  Warning: Could not attach eBPF to any interface\n")
 			}
 		}
 	}

@@ -1,0 +1,96 @@
+---
+# Neo4j Community Edition for CloudVault Storage Intelligence Graph (SIG)
+# Lightweight single-node deployment for kind/dev cluster
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neo4j
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-data
+  namespace: neo4j
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: neo4j
+  labels:
+    app: neo4j
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+    spec:
+      containers:
+        - name: neo4j
+          image: neo4j:5.24-community
+          env:
+            - name: NEO4J_AUTH
+              value: "neo4j/cloudvault123"
+            - name: NEO4J_PLUGINS
+              value: '["apoc"]'
+            - name: NEO4J_dbms_memory_heap_initial__size
+              value: "256m"
+            - name: NEO4J_dbms_memory_heap_max__size
+              value: "512m"
+            - name: NEO4J_dbms_memory_pagecache_size
+              value: "128m"
+          ports:
+            - name: bolt
+              containerPort: 7687
+            - name: http
+              containerPort: 7474
+          resources:
+            limits: { cpu: 500m, memory: 768Mi }
+            requests: { cpu: 200m, memory: 512Mi }
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 7474
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 7474
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: neo4j-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  namespace: neo4j
+spec:
+  selector:
+    app: neo4j
+  ports:
+    - name: bolt
+      port: 7687
+      targetPort: 7687
+    - name: http
+      port: 7474
+      targetPort: 7474

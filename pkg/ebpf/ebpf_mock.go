@@ -4,6 +4,7 @@ package ebpf
 
 import (
 	"errors"
+	"io"
 )
 
 // Agent handles the lifecycle of the eBPF egress monitor (Mock)
@@ -30,6 +31,6 @@ func (a *Agent) GetEgressStats() (map[string]map[string]uint64, error) {
 	}, nil
 }
 
-func (a *Agent) AttachToInterface(ifaceName string) (interface{}, error) {
+func (a *Agent) AttachToInterface(ifaceName string) (io.Closer, error) {
 	return nil, errors.New("eBPF not supported on this platform")
 }

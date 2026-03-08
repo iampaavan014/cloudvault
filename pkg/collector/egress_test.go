@@ -4,10 +4,20 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cloudvault-io/cloudvault/pkg/ebpf"
 	"github.com/cloudvault-io/cloudvault/pkg/integrations"
 	"github.com/cloudvault-io/cloudvault/pkg/types"
 )
+
+// mockEgressAgent implements EgressStatsGetter with stub data for testing.
+type mockEgressAgent struct{}
+
+func (m *mockEgressAgent) GetEgressStats() (map[string]map[string]uint64, error) {
+	return map[string]map[string]uint64{
+		"10.0.1.5": {
+			"1.1.1.1": 157286400,
+		},
+	}, nil
+}
 
 func TestPrometheusEgressProvider_GetEgressBytes(t *testing.T) {
 	provider := &PrometheusEgressProvider{}
@@ -25,7 +35,7 @@ func TestPrometheusEgressProvider_GetEgressBytes(t *testing.T) {
 }
 
 func TestNewEbpfEgressProvider(t *testing.T) {
-	agent := ebpf.NewMockAgent()
+	agent := &mockEgressAgent{}
 	provider := NewEbpfEgressProvider(agent)
 
 	if provider == nil {
@@ -38,7 +48,7 @@ func TestNewEbpfEgressProvider(t *testing.T) {
 }
 
 func TestEbpfEgressProvider_GetEgressBytes_WithAgent(t *testing.T) {
-	agent := ebpf.NewMockAgent()
+	agent := &mockEgressAgent{}
 	provider := NewEbpfEgressProvider(agent)
 
 	ctx := context.Background()

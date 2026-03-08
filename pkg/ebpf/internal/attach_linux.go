@@ -1,6 +1,6 @@
 //go:build linux
 
-package ebpf
+package ebpfgen
 
 import (
 	"fmt"
@@ -11,14 +11,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// SocketOptions specifies parameters for attaching a BPF program to a socket
+type SocketOptions struct {
+	Program *ebpf.Program
+	Target  int
+}
+
 // socketLink implements the link.Link interface for a socket filter
 type socketLink struct {
 	fd int
 }
 
 func (l *socketLink) Close() error {
-	// Note: Closing the link doesn't necessarily stop the filter,
-	// but for our purposes, we manage the lifecycle via Agent
 	return unix.Close(l.fd)
 }
 
@@ -43,29 +47,30 @@ func (l *socketLink) Info() (*link.Info, error) {
 }
 
 // AttachSocket attaches a BPF program to a socket for a specific interface index.
-// This is used by our Agent to hook 'count_egress' into networking.
 func AttachSocket(opts SocketOptions) (io.Closer, error) {
 	if opts.Program == nil {
 		return nil, fmt.Errorf("nil program")
 	}
 
-	// Create a RAW socket to attach the filter to
 	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(unix.ETH_P_ALL))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create raw socket: %w", err)
 	}
 
-	// Bind to the specific interface
+	// htons converts host byte order to network byte order
+	var htons = func(i uint16) uint16 {
+		return (i << 8) | (i >> 8)
+	}
+
 	sll := &unix.SockaddrLinklayer{
 		Ifindex:  opts.Target,
-		Protocol: uint16(unix.ETH_P_ALL),
+		Protocol: htons(unix.ETH_P_ALL),
 	}
 	if err := unix.Bind(fd, sll); err != nil {
 		unix.Close(fd)
 		return nil, fmt.Errorf("failed to bind to interface index %d: %w", opts.Target, err)
 	}
 
-	// Attach the BPF program
 	if err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, opts.Program.FD()); err != nil {
 		unix.Close(fd)
 		return nil, fmt.Errorf("failed to attach BPF program: %w", err)

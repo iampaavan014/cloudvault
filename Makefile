@@ -1,6 +1,6 @@
 .PHONY: all build build-agent build-cli test clean deps fmt lint run help
 
-# Variables
+export GOTOOLCHAIN=auto
 BINARY_AGENT=cloudvault-agent
 BINARY_CLI=cloudvault
 BUILD_DIR=bin
@@ -8,7 +8,7 @@ GO=go
 GOFLAGS=-v
 GOTEST=go test
 GOFMT=gofmt
-GOLINT=golangci-lint
+GOLINT=$(BUILD_DIR)/golangci-lint
 
 # Build info
 VERSION?=v0.1.0-alpha
@@ -49,6 +49,18 @@ deps:
 build: build-web build-agent build-cli
 	@echo "✅ Build complete!"
 
+## generate: Generate eBPF Go code via bpf2go
+generate:
+	@echo "🧬 Generating eBPF code..."
+	@if command -v clang >/dev/null 2>&1 && command -v llvm-strip >/dev/null 2>&1; then \
+		$(GO) generate ./...; \
+		echo "✅ eBPF code generated"; \
+	else \
+		echo "⚠️  Warning: clang or llvm-strip not found. eBPF generation skipped."; \
+		echo "   (This is OK if you are using pre-built Docker images or mocks)"; \
+		echo "   (Install with: sudo apt install clang llvm)"; \
+	fi
+
 ## build-web: Build the CloudVault Web UI
 build-web:
 	@echo "🎨 Building Web UI..."
@@ -60,27 +72,27 @@ build-web:
 	@echo "✅ Web UI built and assets copied."
 
 ## build-agent: Build the CloudVault agent
-build-agent:
+build-agent: generate
 	@echo "🔨 Building $(BINARY_AGENT)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_AGENT) cmd/agent/main.go
 	@echo "✅ Agent built: $(BUILD_DIR)/$(BINARY_AGENT)"
 
 ## build-cli: Build the CloudVault CLI
-build-cli: build-web
+build-cli: build-web generate
 	@echo "🔨 Building $(BINARY_CLI)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_CLI) cmd/cli/main.go
 	@echo "✅ CLI built: $(BUILD_DIR)/$(BINARY_CLI)"
 
 ## test: Run all tests
-test:
+test: build-web
 	@echo "🧪 Running tests..."
 	$(GOTEST) -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 	@echo "✅ Tests complete"
 
 ## unittest: Run unit tests with coverage report
-unittest:
+unittest: build-web
 	@echo "🧪 Running unit tests..."
 	@$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic ./...
 	@echo ""
@@ -108,12 +120,13 @@ fmt:
 	@echo "✅ Code formatted"
 
 ## lint: Run linters (requires golangci-lint)
-lint:
+lint: build-web
 	@echo "🔍 Running linters..."
-	@command -v $(GOLINT) >/dev/null 2>&1 || { \
-		echo "📦 golangci-lint not found. Installing..."; \
-		$(MAKE) dev-deps; \
-	}
+	@if [ ! -f $(GOLINT) ]; then \
+		echo "📦 golangci-lint not found. Installing into $(BUILD_DIR)..."; \
+		mkdir -p $(BUILD_DIR); \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(BUILD_DIR) v1.64.8; \
+	fi
 	$(GOLINT) run ./...
 	@echo "✅ Linting complete"
 
@@ -181,7 +194,8 @@ install: build-cli
 ## dev-deps: Install development dependencies
 dev-deps:
 	@echo "📦 Installing development dependencies..."
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@mkdir -p $(BUILD_DIR)
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(BUILD_DIR) v1.64.8
 	@echo "✅ Development dependencies installed"
 
 ## release: Create a release build (Linux, macOS, Windows)

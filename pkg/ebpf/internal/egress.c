@@ -25,21 +25,13 @@ struct {
 
 SEC("socket")
 int count_egress(struct __sk_buff *skb) {
-    // Only interested in egress
-    // In a socket filter, we can't easily tell ingress vs egress 
-    // without more context, but we'll assume this is attached to a 
-    // container's veth egress or similar.
-    
-    struct egress_stats *stats;
     struct egress_key key = {};
-    
-    // Read IP header
-    // Offset for ETH_HLEN (14)
-    // Source IP is at 12 bytes into IP header (14 + 12 = 26)
-    // Dest IP is at 16 bytes into IP header (14 + 16 = 30)
-    bpf_skb_load_bytes(skb, 26, &key.src_ip, 4);
-    bpf_skb_load_bytes(skb, 30, &key.dst_ip, 4);
+    if (bpf_skb_load_bytes(skb, 26, &key.src_ip, 4) < 0)
+        return 0;
+    if (bpf_skb_load_bytes(skb, 30, &key.dst_ip, 4) < 0)
+        return 0;
 
+    struct egress_stats *stats;
     stats = bpf_map_lookup_elem(&egress_map, &key);
     if (stats) {
         __sync_fetch_and_add(&stats->bytes, skb->len);
@@ -49,7 +41,7 @@ int count_egress(struct __sk_buff *skb) {
         bpf_map_update_elem(&egress_map, &key, &new_stats, BPF_ANY);
     }
 
-    return -1; // Pass packet through
+    return -1;
 }
 
 char _license[] SEC("license") = "GPL";

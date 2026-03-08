@@ -1,0 +1,119 @@
+---
+# CloudVault Demo PVCs
+# Creates realistic storage workloads across namespaces for cost analytics demonstration
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    cloudvault.io/monitored: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    cloudvault.io/monitored: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: analytics
+  labels:
+    cloudvault.io/monitored: "true"
+---
+# production/api-data-pvc — active 50Gi volume
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: api-data-pvc
+  namespace: production
+  labels:
+    app: api-server
+    cloudvault.io/tier: hot
+  annotations:
+    cloudvault.io/created-by: "demo-setup"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: standard
+---
+# production/db-backup-pvc — large zombie candidate (unmounted)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-backup-pvc
+  namespace: production
+  labels:
+    app: database
+    cloudvault.io/tier: cold
+  annotations:
+    cloudvault.io/created-by: "demo-setup"
+    cloudvault.io/last-used: "2025-12-01"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: standard
+---
+# staging/cache-pvc — over-provisioned cache volume
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cache-pvc
+  namespace: staging
+  labels:
+    app: cache
+    cloudvault.io/tier: warm
+  annotations:
+    cloudvault.io/created-by: "demo-setup"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard
+---
+# staging/app-logs-pvc — log storage candidate for cold tier
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-logs-pvc
+  namespace: staging
+  labels:
+    app: logging
+    cloudvault.io/tier: warm
+  annotations:
+    cloudvault.io/created-by: "demo-setup"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard
+---
+# analytics/ml-dataset-pvc — large ML dataset, resize candidate
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-dataset-pvc
+  namespace: analytics
+  labels:
+    app: ml-training
+    cloudvault.io/tier: hot
+  annotations:
+    cloudvault.io/created-by: "demo-setup"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard

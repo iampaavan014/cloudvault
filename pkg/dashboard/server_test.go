@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewServer(t *testing.T) {
-	server := NewServer(nil, nil, "aws", true)
+	server := NewServer(nil, nil, "aws", true, nil)
 
 	if server == nil {
 		t.Fatal("NewServer() returned nil")
@@ -28,7 +28,7 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestHandlePVCs_MockMode(t *testing.T) {
-	server := NewServer(nil, nil, "aws", true)
+	server := NewServer(nil, nil, "aws", true, nil)
 	server.reconcile()
 
 	req := httptest.NewRequest("GET", "/api/pvc", nil)
@@ -68,7 +68,7 @@ func TestHandlePVCs_MockMode(t *testing.T) {
 }
 
 func TestHandleCost_MockMode(t *testing.T) {
-	server := NewServer(nil, nil, "aws", true)
+	server := NewServer(nil, nil, "aws", true, nil)
 	server.reconcile()
 
 	req := httptest.NewRequest("GET", "/api/cost", nil)
@@ -104,7 +104,7 @@ func TestHandleCost_MockMode(t *testing.T) {
 }
 
 func TestHandleRecommendations_MockMode(t *testing.T) {
-	server := NewServer(nil, nil, "aws", true)
+	server := NewServer(nil, nil, "aws", true, nil)
 	server.reconcile()
 
 	req := httptest.NewRequest("GET", "/api/recommendations", nil)

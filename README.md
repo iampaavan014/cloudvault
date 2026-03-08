@@ -53,28 +53,44 @@ CloudVault is designed as a **storage intelligence platform** that integrates wi
 
 ---
 
-## ☸️ Production Deployment (One-Command)
+## ☸️ Production Deployment
 
-CloudVault is production-ready and can be deployed to any Kubernetes cluster via Helm in a single command. 
+CloudVault is production-ready and can be deployed to any Kubernetes cluster via Helm.
 
-### One-Command Quickstart
-For a clean, production-ready installation with the integrated **PyTorch AI Intelligence** and **eBPF Monitoring**:
+### Helm Quickstart
+
+```bash
+# Update Helm dependencies
+helm dependency update ./deploy/charts/cloudvault
+
+# Install with Argo Workflows enabled
+helm upgrade --install cloudvault ./deploy/charts/cloudvault \
+  -n cloudvault --create-namespace \
+  --set argo.enabled=true
+```
+
+See [Helm Chart README](deploy/charts/cloudvault/README.md) for full configuration options.
+
+### Local Development with kind
+
+For local `kind` clusters, the Makefile automates building, image loading, and Helm install:
 
 ```bash
 make production-deploy
 ```
 
-This automated command performs:
-1.  **Cluster Sanitization**: Clears the `cloudvault-test` namespace and any legacy volumes.
-2.  **Containerization**: Builds the Go Agent and Python AI (Gunicorn) production images.
-3.  **Local Image Loading**: Sideloads images into your `kind` cluster.
-4.  **Helm Orchestration**: Installs the full stack with high-performance configurations.
+This performs:
+1.  **Build**: Compiles Go binaries and the Web UI.
+2.  **Containerize**: Builds the Agent and AI (Gunicorn + PyTorch) Docker images.
+3.  **Load Images**: Sideloads images into the local `kind` cluster.
+4.  **Helm Install**: Runs `helm upgrade --install` with production settings.
 
 ### 🍱 Multi-Service Architecture
-The production deployment includes:
-- **CloudVault Agent**: DaemonSet for kernel-level eBPF monitoring (Port 8080).
+The deployment includes:
+- **CloudVault Agent**: DaemonSet for kernel-level eBPF monitoring.
 - **CloudVault AI**: Microservice powered by PyTorch & Gunicorn (Port 5005).
-- **CloudVault Dashboard**: React-based professional cost analytics.
+- **CloudVault Dashboard**: React-based professional cost analytics (Port 8080).
+- **Prometheus**: Metrics collection and monitoring.
 
 ---
 
@@ -99,8 +115,17 @@ To contribute to CloudVault or build individual binaries:
 git clone https://github.com/iampaavan014/cloudvault.git
 cd cloudvault
 
+# Install development dependencies (golangci-lint)
+make dev-deps
+
 # Build binaries (Agent, CLI, and Web Dashboard)
 make build
+
+# Run unit tests
+make unittest
+
+# Run linters
+make lint
 ```
 
 ---

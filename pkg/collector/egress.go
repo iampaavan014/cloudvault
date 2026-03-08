@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cloudvault-io/cloudvault/pkg/ebpf"
 	"github.com/cloudvault-io/cloudvault/pkg/integrations"
 	"github.com/cloudvault-io/cloudvault/pkg/types"
 )
@@ -14,6 +13,12 @@ import (
 type EgressProvider interface {
 	// GetEgressBytes returns a map of Source IP -> Destination IP -> Egress bytes
 	GetEgressBytes(ctx context.Context) (map[string]map[string]uint64, error)
+}
+
+// EgressStatsGetter is the subset of the ebpf.Agent interface needed by the collector.
+// Keeping this interface here avoids a hard dependency on the ebpf package internals.
+type EgressStatsGetter interface {
+	GetEgressStats() (map[string]map[string]uint64, error)
 }
 
 // PrometheusEgressProvider uses metrics from Prometheus (e.g., node_exporter)
@@ -28,10 +33,10 @@ func (p *PrometheusEgressProvider) GetEgressBytes(ctx context.Context) (map[stri
 
 // EbpfEgressProvider uses kernel-level eBPF monitoring (Section 141)
 type EbpfEgressProvider struct {
-	agent *ebpf.Agent
+	agent EgressStatsGetter
 }
 
-func NewEbpfEgressProvider(agent *ebpf.Agent) *EbpfEgressProvider {
+func NewEbpfEgressProvider(agent EgressStatsGetter) *EbpfEgressProvider {
 	return &EbpfEgressProvider{agent: agent}
 }
 

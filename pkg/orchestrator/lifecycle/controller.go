@@ -212,6 +212,11 @@ func (c *LifecycleController) GetStatus() LifecycleStatus {
 	}
 }
 
+// GetManager returns the migration manager for external status queries
+func (c *LifecycleController) GetManager() *MigrationManager {
+	return c.manager
+}
+
 // LifecycleStatus represents the current state of the controller
 type LifecycleStatus struct {
 	ActivePolicies   int
