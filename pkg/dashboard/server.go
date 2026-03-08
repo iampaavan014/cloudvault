@@ -400,7 +400,7 @@ func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request) {
 	aggregateStats := make(map[string]map[string]uint64)
 
 	// To prevent infinite recursion, only aggregate from other pods if this isn't an internal query
-	if r.URL.Query().Get("internal") != "true" {
+	if r.URL.Query().Get("internal") != "true" && s.client != nil {
 		// 1. Get all agent pods (cached discovery)
 		pods, err := s.client.ListPodsByLabel(r.Context(), "", "app=cloudvault-agent")
 

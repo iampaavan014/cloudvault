@@ -6,6 +6,11 @@ import (
 
 // TestAIVerificationSuite covers the "Rock Solid" Pillar 2 requirements
 func TestAIVerificationSuite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping verification suite in short mode")
+	}
+
+	StartMockAIService(t)
 	t.Run("LSTM_Forecasting_Accuracy", func(t *testing.T) {
 		forecaster := NewCostForecaster()
 

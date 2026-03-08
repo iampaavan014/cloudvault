@@ -128,7 +128,7 @@ func (r *IntelligentRecommender) Recommend(pvc types.PVCMetric, policy *v1alpha1
 			TargetClass: pvc.StorageClass,
 			TargetTier:  "hot",
 			TargetSize:  FormatQuantity(suggestedSize),
-			Reason:      "Right-sizing: Workload is over-provisioned (under 60% utilization)",
+			Reason:      fmt.Sprintf("Right-sizing: Workload is over-provisioned (under %d%% utilization)", int(0.6*100)),
 			Confidence:  0.85,
 		}
 	}

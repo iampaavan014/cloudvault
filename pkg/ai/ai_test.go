@@ -2,10 +2,13 @@ package ai
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestLSTMCell_PredictNextCost(t *testing.T) {
 	cell := NewLSTMCell(1, 64)
+	StartMockAIService(t)
 
 	// Test zero history
 	if cost := cell.PredictNextCost([]float64{}); cost != 0 {
@@ -22,6 +25,7 @@ func TestLSTMCell_PredictNextCost(t *testing.T) {
 
 func TestRLAgent_DecidePlacement(t *testing.T) {
 	agent := NewRLAgent()
+	StartMockAIService(t)
 	workload := "test_workload"
 	classes := []string{"gp3", "sc1"}
 
@@ -53,6 +57,7 @@ func TestRLAgent_DecidePlacement(t *testing.T) {
 
 func TestCostForecaster_ForecastMonthlySpend(t *testing.T) {
 	forecaster := NewCostForecaster()
+	StartMockAIService(t)
 	current := 100.0
 	trend := []float64{0.05, 0.05, 0.05}
 
@@ -60,4 +65,29 @@ func TestCostForecaster_ForecastMonthlySpend(t *testing.T) {
 	if forecast <= current {
 		t.Errorf("Expected forecast %f to be greater than current %f for positive trend", forecast, current)
 	}
+}
+
+func TestLSTMCell_PredictTrend(t *testing.T) {
+	StartMockAIService(t)
+	cell := NewLSTMCell(1, 64)
+	history := []float64{0.1, 0.2, 0.3}
+
+	trends := cell.PredictTrend(history, 3)
+	assert.Equal(t, 3, len(trends))
+	for _, v := range trends {
+		assert.Greater(t, v, 0.0)
+	}
+}
+
+func TestRLAgent_RewardFunction(t *testing.T) {
+	agent := NewRLAgent()
+	reward := agent.RewardFunction(10.0, 5.0)
+	// (10.0 * 0.7) + (5.0 * 0.3) = 7.0 + 1.5 = 8.5
+	assert.Equal(t, 8.5, reward)
+}
+
+func TestRLAgent_Learn(t *testing.T) {
+	agent := NewRLAgent()
+	// Just verify it doesn't panic
+	agent.Learn("standard", "gp3", 10.0)
 }

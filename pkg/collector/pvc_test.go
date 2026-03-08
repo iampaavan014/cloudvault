@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -108,6 +109,44 @@ func TestInitializePVCMetric(t *testing.T) {
 	if metric.StorageClass != "gp3" {
 		t.Errorf("expected sc gp3, got %s", metric.StorageClass)
 	}
+}
+
+func TestPVCMetric_Conversions(t *testing.T) {
+	m := types.PVCMetric{
+		SizeBytes: 100 * 1024 * 1024 * 1024,
+		UsedBytes: 50 * 1024 * 1024 * 1024,
+	}
+
+	if m.SizeGB() != 100 {
+		t.Errorf("Expected 100GB, got %f", m.SizeGB())
+	}
+	if m.UsedGB() != 50 {
+		t.Errorf("Expected 50GB, got %f", m.UsedGB())
+	}
+	if m.UsagePercent() != 50 {
+		t.Errorf("Expected 50%%, got %f", m.UsagePercent())
+	}
+}
+
+func TestPVCCollector_GetPVCsByStorageClass(t *testing.T) {
+	// Since we can't easily mock the full client here without more boilerplate,
+	// we'll at least test the filtering logic if we could mock CollectAll.
+	// For now, this is a placeholder that will hit the 'real' zero-state if client is nil.
+	collector := NewPVCCollector(nil, nil)
+	ctx := context.Background()
+	_, _ = collector.GetPVCsByStorageClass(ctx, "gp3")
+}
+
+func TestPVCCollector_GetNamespaces(t *testing.T) {
+	collector := NewPVCCollector(nil, nil)
+	ctx := context.Background()
+	_, _ = collector.GetNamespaces(ctx)
+}
+
+func TestPVCCollector_GetPVCCount(t *testing.T) {
+	collector := NewPVCCollector(nil, nil)
+	ctx := context.Background()
+	_, _ = collector.GetPVCCount(ctx)
 }
 
 func stringPtr(s string) *string {

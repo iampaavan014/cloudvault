@@ -1,56 +1,153 @@
-# CloudVault Architecture (Sandbox Graduation Vision)
+# 🏗️ CloudVault Architecture
 
-## High-Level Overview
+CloudVault is an autonomous, AI-driven storage cost optimization platform for Kubernetes. It implements a multi-layered architecture that combines kernel-level monitoring (eBPF), graph-based relationship mapping (SIG), and deep learning (LSTM/RL) to provide proactive storage governance.
 
-CloudVault is an enterprise-grade storage orchestrator featuring autonomous intelligence and kernel-level visibility.
+---
+
+## 🛰️ High-Level Architecture
+
+The system is organized into three distinct layers:
+
+1.  **Data Plane (Collectors & eBPF)**: Distributed agents running as DaemonSets that harvest raw storage and network telemetry.
+2.  **Control Plane (Orchestrator & Policy Engine)**: The central brain that evaluates state against desired policies and coordinates actions.
+3.  **Intelligence Layer (AI & SIG)**: Specialized microservices that provide predictive insights and relationship analytics.
+
+### System Components Diagram
 
 ```mermaid
-graph TD
-    User[User / CLI] -->|Control| Dash[Dashboard Server]
-    Dash -->|Policies| Orchestrator[Lifecycle Orchestrator]
-    Orchestrator -->|Placement| K8s[Kubernetes API]
-    
-    subgraph "Deep Tech Layer"
-        SIG[(Neo4j SIG Graph)]
-        AI[AI Decision Layer: LSTM/RL]
-        Agent[eBPF Traffic Agent]
+graph TB
+    subgraph "Kubernetes Clusters"
+        Agent[CloudVault Agent]
+        K8S_API[K8s API Server]
+        eBPF[eBPF Program]
+        PVCs[(Persistent Volumes)]
     end
-    
-    subgraph "Collector Core"
-        PVCColl[PVC Collector]
-        EgressColl[Egress Provider]
+
+    subgraph "Control Plane"
+        Orch[Lifecycle Controller]
+        Policy[Policy Engine]
+        Mgr[Migration Manager]
     end
-    
-    PVCColl --> SIG
-    EgressColl -->|Kernel Stats| SIG
-    Agent -->|Egress Data| EgressColl
-    SIG --> AI
-    AI -->|Insights| Dash
-    AI -->|Decisions| Orchestrator
+
+    subgraph "Intelligence Layer"
+        AI[AI Service - PyTorch]
+        SIG[Storage Intelligence Graph - Neo4j]
+        TSDB[TimescaleDB]
+    end
+
+    subgraph "Frontend"
+        Dash[CloudVault Dashboard]
+    end
+
+    Agent -- Sends Metrics --> Orch
+    eBPF -- Ingress/Egress --> Agent
+    Orch -- Syncs State --> SIG
+    Orch -- Records History --> TSDB
+    Orch -- Queries --> AI
+    Orch -- Evaluates --> Policy
+    Orch -- Triggers --> Mgr
+    Mgr -- Patches --> K8S_API
+    Dash -- Visualizes --> Orch
+    Dash -- Displays --> SIG
 ```
 
-## Core Components
+---
 
-### 1. eBPF Zero-Overhead Agent
--   **Kernel Monitoring**: Monitors `socket` events to attribute egress traffic to specific workloads.
--   **Zero-Overhead**: Eliminates the need for heavy sidecars or manual instrumentation.
+## 🔁 Operational Flow Sequence
 
-### 2. Storage Intelligence Graph (SIG)
--   **Neo4j Backed**: Stores multi-dimensional relationships between Pods, PVCs, Nodes, and Regions.
--   **Gravity Detection**: Identifies workloads pulled into high-cost zones by storage dependencies.
+CloudVault operates in a continuous "Sense-Think-Act" loop.
 
-### 3. AI-Powered Decision Layer
--   **LSTM Cost Forecaster**: Predicts spend trends to prevent "Sticker Shock".
--   **RL Placement Engine**: Uses Reinforcement Learning to optimize storage tiering based on learned workload patterns.
+### 1. Data Collection (Sense)
+*   **eBPF Agent**: Attaches to network interfaces to attribute egress traffic to specific PVCs by mapping IP traffic to Pod/PVC relationships.
+*   **Kubernetes Collector**: Scrapes PVC utilization, provisioning metadata, and cloud provider pricing (AWS/GCP/Azure).
 
-### 4. Enterprise Scaling (Phase 9)
--   **Adaptive Worker Pools**: Collector scales concurrency based on PVC count.
--   **Batched Processing**: High-throughput graph updates using transaction unwind patterns.
--   **Health Observability**: Integrated `/healthz` and `/readyz` probes for Kubernetes.
+### 2. Analysis & Recommendation (Think)
+*   **Storage Intelligence Graph (SIG)**: Maps Pod-to-PVC locality to detect "Data Gravity" issues (e.g., a Pod in `us-east-1` accessing a PVC in `us-east-2`).
+*   **AI Forecaster (LSTM)**: Analyzes historical growth patterns in TimescaleDB to predict when a volume will run out of space or become a "Zombie".
+*   **Placement Agent (RL)**: Uses Reinforcement Learning to decide the optimal storage tier based on performance/cost trade-offs.
 
-## Data Flow: Metrics Collection & Optimization
+### 3. Governance & Migration (Act)
+*   **Policy Engine**: Matches recommendations against `StorageLifecyclePolicies`.
+*   **Migration Manager**: Executes non-disruptive migrations using Argo Workflows or direct volume cloning strategies.
 
-1.  **Collection**: The `PVCCollector` queries the Kubernetes API for PVC metadata. Worker pools scale dynamically based on cluster size.
-2.  **Egress Attribution**: eBPF-derived egress data is correlated with PVCs once per cycle to reduce kernel overhead.
-3.  **Graph Sync**: Metrics are pushed to the SIG in batch transactions for complex relationship analysis.
-4.  **AI Inference**: The Decision Layer processes graph state to generate predictive placements.
+---
+
+## 🧪 Sequence Diagram: Optimization Loop
+
+This diagram illustrates the lifecycle of a single optimization recommendation, from detection to execution.
+
+```mermaid
+sequenceDiagram
+    participant K as K8s API
+    participant C as Collector
+    participant O as Orchestrator
+    participant AI as AI Service
+    participant P as Policy Engine
+    participant M as Migration Manager
+    participant A as Argo Workflows
+
+    O->>C: CollectAll(ctx)
+    C->>K: List PVCs / Pods
+    K-->>C: Data
+    C-->>O: types.PVCMetrics[]
+
+    O->>AI: Recommend(metrics)
+    AI->>AI: Run LSTM/RL Models
+    AI-->>O: OptimizationRecommendation
+
+    O->>P: Match(pvc, policies)
+    P-->>O: MatchingPolicy
+
+    O->>P: Evaluate(pvc, policy)
+    P-->>O: TargetTier (Action Required)
+
+    O->>M: ExecuteMigration(ns, name, target)
+    M->>K: Annotate PVC (Governance Action)
+    M->>A: Create Migration Workflow
+    A->>K: Execute Data Copy/Patching
+```
+
+---
+
+## 🛠️ Low-Level Component Details
+
+### 1. CloudVault Agent (Data Plane)
+*   **eBPF Bytecode**: Custom C programs compiled to eBPF bytecode, loaded into the kernel to monitor `tc` (traffic control) hooks.
+*   **Prometheus Exporter**: Serves metrics on `:9090` for scraping.
+*   **Cost Calculator**: Embedded logic for calculating "Effective Cost" by blending provisioning price with egress overhead.
+
+### 2. Lifecycle Controller (Control Plane)
+*   **ProcessOptimization**: The core loop running every `N` minutes.
+*   **SyncPodRelationships**: Discovers which pods are using which PVCs to build the SIG gravity map.
+*   **Migration Executor**: Handles the complex logic of patching workloads during storage moves.
+
+### 3. AI Service (Intelligence Layer)
+*   **LSTM Model**: Implemented in PyTorch, specifically tuned for time-series forecasting of sparse billing data.
+*   **RL Agent**: Uses Q-Learning to optimize "Placement Reward" (Max Performance / Min Cost).
+
+---
+
+## 📈 Detailed Flow Chart: Migration Execution
+
+```mermaid
+flowchart TD
+    Start([Execute Migration]) --> PreCheck{Pre-flight Check}
+    PreCheck -- Fail --> Error([Mark Failed])
+    PreCheck -- Pass --> Strategy{Select Strategy}
+    
+    Strategy -- Backup/Restore --> Velero[Trigger Velero Backup]
+    Strategy -- Volume Clone --> Snap[Create Storage Snapshots]
+    
+    Velero --> WaitV[Wait for Completion]
+    Snap --> TargetPVC[Create Target PVCs]
+    
+    WaitV --> Restore[Restore to Target]
+    TargetPVC --> DataCopy[Copy Data - rsync/clone]
+    
+    Restore --> Valid[Validate Integrity]
+    DataCopy --> Valid
+    
+    Valid -- OK --> Patch[Update Workload/Services]
+    Patch --> Cleanup[Remove Source Resources]
+    Cleanup --> End([Migration Complete])
+```

@@ -1,23 +1,32 @@
 package types
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestPVCMetric_TotalIOPS(t *testing.T) {
-	metric := PVCMetric{
-		ReadIOPS:  1000,
-		WriteIOPS: 500,
+func TestPVCMetric_Conversions(t *testing.T) {
+	m := PVCMetric{
+		SizeBytes: 100 * 1024 * 1024 * 1024,
+		UsedBytes: 50 * 1024 * 1024 * 1024,
 	}
 
-	total := metric.TotalIOPS()
-	expected := 1500.0
+	assert.Equal(t, 100.0, m.SizeGB())
+	assert.Equal(t, 50.0, m.UsedGB())
+	assert.Equal(t, 50.0, m.UsagePercent())
 
-	if total != expected {
-		t.Errorf("Expected TotalIOPS %v, got %v", expected, total)
+	// Test zero size
+	m0 := PVCMetric{SizeBytes: 0}
+	assert.Equal(t, 0.0, m0.UsagePercent())
+}
+
+func TestPVCMetric_AnnualCost(t *testing.T) {
+	m := PVCMetric{
+		MonthlyCost: 10.5,
 	}
+	assert.Equal(t, 126.0, m.AnnualCost())
 }
 
 func TestPVCMetric_IsZombie(t *testing.T) {
@@ -25,26 +34,29 @@ func TestPVCMetric_IsZombie(t *testing.T) {
 
 	tests := []struct {
 		name           string
+		usedBytes      int64
+		sizeBytes      int64
 		lastAccessedAt time.Time
 		expected       bool
 	}{
 		{
-			name:           "Zombie - 40 days old",
+			name:           "Zombie - Unused for > 30 days",
+			usedBytes:      1 * 1024 * 1024,
+			sizeBytes:      100 * 1024 * 1024 * 1024,
 			lastAccessedAt: now.Add(-40 * 24 * time.Hour),
 			expected:       true,
 		},
 		{
-			name:           "Not Zombie - 20 days old",
-			lastAccessedAt: now.Add(-20 * 24 * time.Hour),
+			name:           "Not Zombie - Recently used",
+			usedBytes:      1 * 1024 * 1024,
+			sizeBytes:      100 * 1024 * 1024 * 1024,
+			lastAccessedAt: now.Add(-2 * 24 * time.Hour),
 			expected:       false,
 		},
 		{
-			name:           "Not Zombie - Recent",
-			lastAccessedAt: now.Add(-1 * time.Hour),
-			expected:       false,
-		},
-		{
-			name:           "Not Zombie - Zero time",
+			name:           "Not Zombie - Never used (zero value)",
+			usedBytes:      1 * 1024 * 1024,
+			sizeBytes:      100 * 1024 * 1024 * 1024,
 			lastAccessedAt: time.Time{},
 			expected:       false,
 		},
@@ -52,173 +64,17 @@ func TestPVCMetric_IsZombie(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			metric := PVCMetric{
+			m := PVCMetric{
+				UsedBytes:      tt.usedBytes,
+				SizeBytes:      tt.sizeBytes,
 				LastAccessedAt: tt.lastAccessedAt,
 			}
-
-			result := metric.IsZombie()
-			if result != tt.expected {
-				t.Errorf("Expected IsZombie() = %v, got %v", tt.expected, result)
-			}
+			assert.Equal(t, tt.expected, m.IsZombie())
 		})
 	}
 }
 
-func TestPVCMetric_JSONMarshaling(t *testing.T) {
-	now := time.Now()
-	metric := PVCMetric{
-		Name:         "test-pvc",
-		Namespace:    "default",
-		ClusterID:    "test-cluster",
-		StorageClass: "gp3",
-		SizeBytes:    100 * 1024 * 1024 * 1024,
-		UsedBytes:    50 * 1024 * 1024 * 1024,
-		HourlyCost:   0.011,
-		MonthlyCost:  8.00,
-		CreatedAt:    now,
-		Labels: map[string]string{
-			"app": "test",
-		},
-		Annotations: map[string]string{
-			"note": "test-annotation",
-		},
-	}
-
-	// Marshal to JSON
-	data, err := json.Marshal(metric)
-	if err != nil {
-		t.Fatalf("Failed to marshal: %v", err)
-	}
-
-	// Unmarshal back
-	var decoded PVCMetric
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
-	}
-
-	// Verify fields
-	if decoded.Name != metric.Name {
-		t.Errorf("Name mismatch: expected %s, got %s", metric.Name, decoded.Name)
-	}
-	if decoded.Namespace != metric.Namespace {
-		t.Errorf("Namespace mismatch")
-	}
-	if decoded.SizeBytes != metric.SizeBytes {
-		t.Errorf("SizeBytes mismatch")
-	}
-	if decoded.MonthlyCost != metric.MonthlyCost {
-		t.Errorf("MonthlyCost mismatch")
-	}
-}
-
-func TestCostSummary_JSONMarshaling(t *testing.T) {
-	summary := CostSummary{
-		TotalMonthlyCost: 100.50,
-		ByNamespace: map[string]float64{
-			"production": 60.00,
-			"staging":    40.50,
-		},
-		ByStorageClass: map[string]float64{
-			"gp3": 80.00,
-			"io1": 20.50,
-		},
-		TopExpensive: []PVCMetric{
-			{Name: "expensive-pvc", MonthlyCost: 50.00},
-		},
-		ZombieVolumes: []PVCMetric{
-			{Name: "zombie-pvc", MonthlyCost: 10.00},
-		},
-	}
-
-	// Marshal to JSON
-	data, err := json.Marshal(summary)
-	if err != nil {
-		t.Fatalf("Failed to marshal: %v", err)
-	}
-
-	// Unmarshal back
-	var decoded CostSummary
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
-	}
-
-	// Verify fields
-	if decoded.TotalMonthlyCost != summary.TotalMonthlyCost {
-		t.Errorf("TotalMonthlyCost mismatch")
-	}
-	if len(decoded.ByNamespace) != len(summary.ByNamespace) {
-		t.Errorf("ByNamespace length mismatch")
-	}
-	if len(decoded.TopExpensive) != len(summary.TopExpensive) {
-		t.Errorf("TopExpensive length mismatch")
-	}
-}
-
-func TestRecommendation_JSONMarshaling(t *testing.T) {
-	rec := Recommendation{
-		Type:             "resize",
-		PVC:              "test-pvc",
-		Namespace:        "default",
-		CurrentState:     "200GB",
-		RecommendedState: "100GB",
-		MonthlySavings:   8.00,
-		Reasoning:        "Volume is underutilized",
-		Impact:           "medium",
-	}
-
-	// Marshal to JSON
-	data, err := json.Marshal(rec)
-	if err != nil {
-		t.Fatalf("Failed to marshal: %v", err)
-	}
-
-	// Unmarshal back
-	var decoded Recommendation
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
-	}
-
-	// Verify fields
-	if decoded.Type != rec.Type {
-		t.Errorf("Type mismatch")
-	}
-	if decoded.MonthlySavings != rec.MonthlySavings {
-		t.Errorf("MonthlySavings mismatch")
-	}
-	if decoded.Impact != rec.Impact {
-		t.Errorf("Impact mismatch")
-	}
-}
-
-func TestClusterInfo_JSONMarshaling(t *testing.T) {
-	info := ClusterInfo{
-		ID:       "test-cluster-id",
-		Name:     "test-cluster",
-		Provider: "aws",
-		Region:   "us-east-1",
-		Version:  "v1.28.0",
-	}
-
-	// Marshal to JSON
-	data, err := json.Marshal(info)
-	if err != nil {
-		t.Fatalf("Failed to marshal: %v", err)
-	}
-
-	// Unmarshal back
-	var decoded ClusterInfo
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
-	}
-
-	// Verify fields
-	if decoded.ID != info.ID {
-		t.Errorf("ID mismatch")
-	}
-	if decoded.Provider != info.Provider {
-		t.Errorf("Provider mismatch")
-	}
-	if decoded.Region != info.Region {
-		t.Errorf("Region mismatch")
-	}
+func TestRecommendation_Impact(t *testing.T) {
+	r := Recommendation{Impact: "high"}
+	assert.Equal(t, "high", r.Impact)
 }

@@ -47,6 +47,9 @@ func (c *PVCCollector) SetEgressProvider(p EgressProvider) {
 // CollectAll collects metrics for all PVCs in the cluster using concurrent workers.
 // Refactored in Phase 3 to use batch Prometheus queries and background patterns.
 func (c *PVCCollector) CollectAll(ctx context.Context) ([]types.PVCMetric, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("kubernetes client not initialized")
+	}
 	// Get cluster info first (needed for all metrics)
 	clusterInfo, err := c.client.GetClusterInfo(ctx)
 	if err != nil {
@@ -213,7 +216,7 @@ func (c *PVCCollector) CollectAll(ctx context.Context) ([]types.PVCMetric, error
 	return metrics, nil
 }
 
-// CollectByNamespace collects metrics for PVCs in a specific namespace
+// CollectByNamespace collects metrics for PVCs in a specific namespace using a worker pool.
 func (c *PVCCollector) CollectByNamespace(ctx context.Context, namespace string) ([]types.PVCMetric, error) {
 	clusterInfo, err := c.client.GetClusterInfo(ctx)
 	if err != nil {
@@ -228,11 +231,52 @@ func (c *PVCCollector) CollectByNamespace(ctx context.Context, namespace string)
 		return nil, fmt.Errorf("failed to list PVCs in namespace %s: %w", namespace, err)
 	}
 
-	var metrics []types.PVCMetric
+	numPVCs := len(pvcs.Items)
+	if numPVCs == 0 {
+		return []types.PVCMetric{}, nil
+	}
 
-	for _, pvc := range pvcs.Items {
-		metric := c.initializePVCMetric(&pvc, clusterInfo)
-		metrics = append(metrics, *metric)
+	// For single namespace, we use a smaller pool (max 10)
+	numWorkers := numPVCs / 2
+	if numWorkers < 2 {
+		numWorkers = 2
+	}
+	if numWorkers > 10 {
+		numWorkers = 10
+	}
+
+	jobs := make(chan *corev1.PersistentVolumeClaim, numPVCs)
+	results := make(chan *types.PVCMetric, numPVCs)
+
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			for pvc := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				metric := c.initializePVCMetric(pvc, clusterInfo)
+				// Note: For namespace-scoped collection, we might skip some cross-ns lookups
+				// if we wanted to be faster, but here we maintain full parity with CollectAll logic
+				results <- metric
+			}
+		}()
+	}
+
+	for i := range pvcs.Items {
+		jobs <- &pvcs.Items[i]
+	}
+	close(jobs)
+
+	var metrics []types.PVCMetric
+	for i := 0; i < numPVCs; i++ {
+		select {
+		case metric := <-results:
+			metrics = append(metrics, *metric)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
 	return metrics, nil
@@ -284,6 +328,9 @@ func (c *PVCCollector) initializePVCMetric(pvc *corev1.PersistentVolumeClaim,
 
 // GetPVCCount returns the total number of PVCs in the cluster
 func (c *PVCCollector) GetPVCCount(ctx context.Context) (int, error) {
+	if c.client == nil {
+		return 0, fmt.Errorf("kubernetes client not initialized")
+	}
 	pvcs, err := c.client.clientset.CoreV1().
 		PersistentVolumeClaims("").
 		List(ctx, metav1.ListOptions{})
@@ -295,6 +342,9 @@ func (c *PVCCollector) GetPVCCount(ctx context.Context) (int, error) {
 
 // GetPVCsByStorageClass returns all PVCs using a specific storage class
 func (c *PVCCollector) GetPVCsByStorageClass(ctx context.Context, storageClass string) ([]types.PVCMetric, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("kubernetes client not initialized")
+	}
 	allMetrics, err := c.CollectAll(ctx)
 	if err != nil {
 		return nil, err
@@ -312,6 +362,9 @@ func (c *PVCCollector) GetPVCsByStorageClass(ctx context.Context, storageClass s
 
 // GetNamespaces returns all namespaces that have PVCs
 func (c *PVCCollector) GetNamespaces(ctx context.Context) ([]string, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("kubernetes client not initialized")
+	}
 	pvcs, err := c.client.clientset.CoreV1().
 		PersistentVolumeClaims("").
 		List(ctx, metav1.ListOptions{})

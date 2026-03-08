@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudvault-io/cloudvault/pkg/ai"
 	"github.com/cloudvault-io/cloudvault/pkg/types"
 	"github.com/cloudvault-io/cloudvault/pkg/types/apis/v1alpha1"
 	"github.com/stretchr/testify/assert"
@@ -288,6 +289,7 @@ func TestIntelligentRecommender(t *testing.T) {
 		},
 	}
 
+	ai.StartMockAIService(t)
 	recommendations := []*OptimizationRecommendation{}
 	for _, m := range metrics {
 		if rec := recommender.Recommend(m, nil); rec != nil {
@@ -296,12 +298,12 @@ func TestIntelligentRecommender(t *testing.T) {
 	}
 
 	// Should generate at least 3 recommendations
-	assert.GreaterOrEqual(t, len(recommendations), 1) // Adjusted expectation
+	assert.GreaterOrEqual(t, len(recommendations), 1)
 
 	// Verify over-provisioning detected
 	foundResize := false
 	for _, rec := range recommendations {
-		if rec.Reason == "Right-sizing: Workload is over-provisioned (under 30% utilization)" {
+		if rec.Reason == "Right-sizing: Workload is over-provisioned (under 60% utilization)" {
 			foundResize = true
 			assert.NotEmpty(t, rec.TargetSize)
 		}
@@ -520,4 +522,24 @@ func BenchmarkMigrationPlanning(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = executor.CreateMigrationPlan(context.Background(), rec, metrics)
 	}
+}
+
+func TestMigrationExecutor_Getters(t *testing.T) {
+	executor, _ := NewMigrationExecutor(nil, "default")
+
+	plan := &MigrationPlan{ID: "m1"}
+	executor.migrations["m1"] = &MigrationStatus{Plan: plan, State: "running"}
+
+	active := executor.GetActiveMigrations()
+	assert.Equal(t, 1, len(active))
+
+	all := executor.GetAllMigrations()
+	assert.Equal(t, 1, len(all))
+
+	status, err := executor.GetMigrationStatus("m1")
+	assert.NoError(t, err)
+	assert.Equal(t, "running", status.State)
+
+	_, err = executor.GetMigrationStatus("non-existent")
+	assert.Error(t, err)
 }

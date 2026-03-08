@@ -35,51 +35,82 @@ func NewOptimizer() *Optimizer {
 //
 // Recommendations are sorted by potential monthly savings, highest first.
 func (o *Optimizer) GenerateRecommendations(metrics []types.PVCMetric, provider string) []types.Recommendation {
+
+	numMetrics := len(metrics)
+	if numMetrics == 0 {
+		return nil
+	}
+
+	// Optimize: Use concurrency for recommendation generation (Phase 3)
+	// Parallelize the analysis passes (Zombie, StorageClass, Oversized, CrossCloud)
+	results := make(chan []types.Recommendation, numMetrics)
+	numWorkers := 10
+	if numMetrics < 10 {
+		numWorkers = numMetrics
+	}
+
+	jobs := make(chan int, numMetrics)
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			for idx := range jobs {
+				var recs []types.Recommendation
+				m := &metrics[idx]
+
+				if rec := o.checkZombieVolume(m); rec != nil {
+					recs = append(recs, *rec)
+				}
+				if rec := o.checkStorageClassOptimization(m, provider); rec != nil {
+					recs = append(recs, *rec)
+				}
+
+				// AI-Powered: Predict future cost and adjust impact
+				// We assume cheap mock/local cache for now; in prod this would be batch-fetched
+				futureCost := o.forecaster.ForecastMonthlySpend(m.MonthlyCost, []float64{0.1, 0.2, 0.15})
+				if futureCost > m.MonthlyCost*1.2 {
+					if rec := o.checkOversizedVolume(m); rec != nil {
+						rec.Reasoning = fmt.Sprintf("[AI Predict] %s (Predicted growth: +20%%)", rec.Reasoning)
+						rec.Impact = "high"
+						recs = append(recs, *rec)
+					}
+				} else {
+					if rec := o.checkOversizedVolume(m); rec != nil {
+						recs = append(recs, *rec)
+					}
+				}
+
+				// RL-Powered
+				bestClass := o.rlAgent.DecidePlacement("standard_workload", []string{"gp3", "sc1", "st1"})
+				if bestClass != m.StorageClass && m.StorageClass == "gp2" {
+					recs = append(recs, types.Recommendation{
+						Type:             "ai_placement",
+						PVC:              m.Name,
+						Namespace:        m.Namespace,
+						CurrentState:     m.StorageClass,
+						RecommendedState: bestClass,
+						MonthlySavings:   2.50,
+						Reasoning:        "[RL Decision] Learned optimal placement for this workload pattern.",
+						Impact:           "low",
+					})
+				}
+
+				if rec := o.checkCrossCloudMigration(m); rec != nil {
+					recs = append(recs, *rec)
+				}
+
+				results <- recs
+			}
+		}()
+	}
+
+	for i := 0; i < numMetrics; i++ {
+		jobs <- i
+	}
+	close(jobs)
+
 	var recommendations []types.Recommendation
-
-	for i := range metrics {
-		// ... existing checks ...
-		if rec := o.checkZombieVolume(&metrics[i]); rec != nil {
-			recommendations = append(recommendations, *rec)
-		}
-		if rec := o.checkStorageClassOptimization(&metrics[i], provider); rec != nil {
-			recommendations = append(recommendations, *rec)
-		}
-
-		// AI-Powered: Predict future cost and adjust impact
-		futureCost := o.forecaster.ForecastMonthlySpend(metrics[i].MonthlyCost, []float64{0.1, 0.2, 0.15})
-		if futureCost > metrics[i].MonthlyCost*1.2 {
-			// If cost is predicted to grow >20%, prioritize optimization
-			if rec := o.checkOversizedVolume(&metrics[i]); rec != nil {
-				rec.Reasoning = fmt.Sprintf("[AI Predict] %s (Predicted growth: +20%%)", rec.Reasoning)
-				rec.Impact = "high"
-				recommendations = append(recommendations, *rec)
-			}
-		} else {
-			if rec := o.checkOversizedVolume(&metrics[i]); rec != nil {
-				recommendations = append(recommendations, *rec)
-			}
-		}
-
-		// RL-Powered: Decide best tier based on learned behavior
-		bestClass := o.rlAgent.DecidePlacement("standard_workload", []string{"gp3", "sc1", "st1"})
-		if bestClass != metrics[i].StorageClass && metrics[i].StorageClass == "gp2" {
-			recommendations = append(recommendations, types.Recommendation{
-				Type:             "ai_placement",
-				PVC:              metrics[i].Name,
-				Namespace:        metrics[i].Namespace,
-				CurrentState:     metrics[i].StorageClass,
-				RecommendedState: bestClass,
-				MonthlySavings:   2.50,
-				Reasoning:        "[RL Decision] Learned optimal placement for this workload pattern.",
-				Impact:           "low",
-			})
-		}
-
-		// Phase 22 MCE Intelligence: Check for cross-cloud savings
-		if rec := o.checkCrossCloudMigration(&metrics[i]); rec != nil {
-			recommendations = append(recommendations, *rec)
-		}
+	for i := 0; i < numMetrics; i++ {
+		recs := <-results
+		recommendations = append(recommendations, recs...)
 	}
 
 	// Sort by savings

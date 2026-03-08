@@ -27,7 +27,16 @@ func init() {
 
 // getAIServiceURL returns the base URL for the recursive neural network inference service.
 func getAIServiceURL() string {
+	healthCheckMutex.RLock()
+	defer healthCheckMutex.RUnlock()
 	return aiServiceURL
+}
+
+// SetAIServiceURL overrides the AI service URL (primarily for testing)
+func SetAIServiceURL(url string) {
+	healthCheckMutex.Lock()
+	defer healthCheckMutex.Unlock()
+	aiServiceURL = url
 }
 
 // IsAIServiceHealthy returns whether the AI service is currently reachable

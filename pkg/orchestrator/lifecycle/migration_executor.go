@@ -32,11 +32,13 @@ type MigrationPlan struct {
 	Name              string
 	SourceCluster     string
 	TargetCluster     string
-	SourcePVCs        []types.PVCMetric
+	PVCs              []types.PVCMetric
+	TargetClass       string
 	Reason            string
 	EstimatedSavings  float64
 	EstimatedDuration time.Duration
 	Impact            MigrationImpact
+	RiskLevel         string
 	Strategy          string // "velero-backup-restore" or "volume-clone"
 	CreatedAt         time.Time
 	ApprovedBy        string
@@ -110,21 +112,26 @@ func NewMigrationExecutor(config *rest.Config, argoNamespace string) (*Migration
 
 // CreateMigrationPlan creates a migration plan from a recommendation
 func (m *MigrationExecutor) CreateMigrationPlan(ctx context.Context, rec types.Recommendation, pvcs []types.PVCMetric) (*MigrationPlan, error) {
+	duration := estimateMigrationDuration(pvcs)
+	impact := m.calculateImpact(ctx, pvcs)
+	risk := m.assessRisk(rec, impact)
+	target := extractTargetFromRecommendation(rec)
+
 	plan := &MigrationPlan{
-		ID:                fmt.Sprintf("migration-%d", time.Now().Unix()),
+		ID:                fmt.Sprintf("mig-%d", time.Now().Unix()),
 		Name:              fmt.Sprintf("Migrate %s", rec.PVC),
 		SourceCluster:     "current",
-		TargetCluster:     extractTargetFromRecommendation(rec),
-		SourcePVCs:        pvcs,
+		TargetCluster:     target,
+		PVCs:              pvcs,
+		TargetClass:       rec.RecommendedState,
 		Reason:            rec.Reasoning,
 		EstimatedSavings:  rec.MonthlySavings,
-		EstimatedDuration: estimateMigrationDuration(pvcs),
+		EstimatedDuration: duration,
+		Impact:            impact,
+		RiskLevel:         risk,
 		Strategy:          m.selectMigrationStrategy(),
 		CreatedAt:         time.Now(),
 	}
-
-	// Calculate impact
-	plan.Impact = m.calculateImpact(ctx, pvcs)
 
 	return plan, nil
 }
@@ -219,7 +226,7 @@ func (m *MigrationExecutor) stepPreFlightCheck(ctx context.Context, exec *Migrat
 	slog.Info("Running pre-flight checks")
 
 	// Check if PVCs exist
-	for _, pvc := range plan.SourcePVCs {
+	for _, pvc := range plan.PVCs {
 		_, err := m.sourceClient.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(ctx, pvc.Name, metav1.GetOptions{})
 		if err != nil {
 			return fmt.Errorf("source PVC %s/%s not found: %w", pvc.Namespace, pvc.Name, err)
@@ -249,7 +256,7 @@ func (m *MigrationExecutor) stepCreateVeleroBackup(ctx context.Context, exec *Mi
 				"namespace": "velero",
 			},
 			"spec": map[string]interface{}{
-				"includedNamespaces": []string{plan.SourcePVCs[0].Namespace},
+				"includedNamespaces": []string{plan.PVCs[0].Namespace},
 				"includedResources":  []string{"persistentvolumeclaims", "persistentvolumes"},
 				"storageLocation":    "default",
 				"ttl":                "72h0m0s",
@@ -347,7 +354,7 @@ func (m *MigrationExecutor) stepRestoreToTarget(ctx context.Context, exec *Migra
 			},
 			"spec": map[string]interface{}{
 				"backupName":         fmt.Sprintf("cloudvault-backup-%s", plan.ID),
-				"includedNamespaces": []string{plan.SourcePVCs[0].Namespace},
+				"includedNamespaces": []string{plan.PVCs[0].Namespace},
 			},
 		},
 	}
@@ -407,7 +414,7 @@ func (m *MigrationExecutor) stepCreateSnapshots(ctx context.Context, exec *Migra
 		Resource: "volumesnapshots",
 	}
 
-	for _, pvc := range plan.SourcePVCs {
+	for _, pvc := range plan.PVCs {
 		snapshotName := fmt.Sprintf("%s-snapshot-%s", pvc.Name, plan.ID)
 		snapshot := &unstructured.Unstructured{
 			Object: map[string]interface{}{
@@ -439,7 +446,7 @@ func (m *MigrationExecutor) stepCreateSnapshots(ctx context.Context, exec *Migra
 func (m *MigrationExecutor) stepCreateTargetPVCs(ctx context.Context, exec *MigrationExecutor, plan *MigrationPlan) error {
 	slog.Info("Creating target PVCs from snapshots", "plan", plan.ID)
 
-	for _, pvc := range plan.SourcePVCs {
+	for _, pvc := range plan.PVCs {
 		targetName := fmt.Sprintf("%s-cloned", pvc.Name)
 		snapshotName := fmt.Sprintf("%s-snapshot-%s", pvc.Name, plan.ID)
 
@@ -480,16 +487,98 @@ func (m *MigrationExecutor) stepCreateTargetPVCs(ctx context.Context, exec *Migr
 }
 
 func (m *MigrationExecutor) stepCopyData(ctx context.Context, exec *MigrationExecutor, plan *MigrationPlan) error {
-	slog.Info("Copying data to target PVCs")
+	slog.Info("Copying data to target PVCs via sync Job", "plan", plan.ID)
 
-	// Use rsync or similar for data copy
-	totalSize := int64(0)
-	for _, pvc := range plan.SourcePVCs {
-		totalSize += pvc.UsedBytes
+	for _, pvc := range plan.PVCs {
+		targetName := fmt.Sprintf("%s-cloned", pvc.Name)
+		jobName := fmt.Sprintf("cloudvault-sync-%s", plan.ID)
+
+		// Create a Job that mounts both PVCs and rsyncs data
+		syncJob := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "batch/v1",
+				"kind":       "Job",
+				"metadata": map[string]interface{}{
+					"name":      jobName,
+					"namespace": pvc.Namespace,
+				},
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"restartPolicy": "Never",
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name":    "sync",
+									"image":   "alpine:latest",
+									"command": []string{"sh", "-c", "apk add --no-cache rsync && rsync -avzh /src/ /dst/"},
+									"volumeMounts": []interface{}{
+										map[string]interface{}{
+											"name":      "source",
+											"mountPath": "/src",
+										},
+										map[string]interface{}{
+											"name":      "target",
+											"mountPath": "/dst",
+										},
+									},
+								},
+							},
+							"volumes": []interface{}{
+								map[string]interface{}{
+									"name": "source",
+									"persistentVolumeClaim": map[string]interface{}{
+										"claimName": pvc.Name,
+									},
+								},
+								map[string]interface{}{
+									"name": "target",
+									"persistentVolumeClaim": map[string]interface{}{
+										"claimName": targetName,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		gvr := schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}
+		_, err := m.dynamicClient.Resource(gvr).Namespace(pvc.Namespace).Create(ctx, syncJob, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to create sync job for %s: %w", pvc.Name, err)
+		}
+
+		// Wait for job completion
+		timeout := time.After(20 * time.Minute)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		completed := false
+		for !completed {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timeout:
+				return fmt.Errorf("timeout waiting for sync job %s", jobName)
+			case <-ticker.C:
+				job, err := m.dynamicClient.Resource(gvr).Namespace(pvc.Namespace).Get(ctx, jobName, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				status, _, _ := unstructured.NestedMap(job.Object, "status")
+				succeeded, _, _ := unstructured.NestedInt64(status, "succeeded")
+				failed, _, _ := unstructured.NestedInt64(status, "failed")
+
+				if succeeded > 0 {
+					completed = true
+				} else if failed > 0 {
+					return fmt.Errorf("data sync job %s failed", jobName)
+				}
+			}
+		}
+		slog.Info("Data sync completed for PVC", "pvc", pvc.Name)
 	}
-
-	slog.Info("Data copy in progress", "totalSize", totalSize)
-	time.Sleep(3 * time.Second)
 
 	return nil
 }
@@ -497,27 +586,70 @@ func (m *MigrationExecutor) stepCopyData(ctx context.Context, exec *MigrationExe
 func (m *MigrationExecutor) stepValidateMigration(ctx context.Context, exec *MigrationExecutor, plan *MigrationPlan) error {
 	slog.Info("Validating migration")
 
-	// Verify data integrity, checksums, etc.
-	time.Sleep(1 * time.Second)
+	// Verify target PVCs exist and are Bound
+	for _, pvc := range plan.PVCs {
+		targetName := fmt.Sprintf("%s-cloned", pvc.Name)
+		p, err := m.targetClient.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(ctx, targetName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("target PVC %s not found: %w", targetName, err)
+		}
+		if p.Status.Phase != "Bound" {
+			return fmt.Errorf("target PVC %s is not Bound (phase: %s)", targetName, p.Status.Phase)
+		}
+	}
 
 	slog.Info("Validation passed")
 	return nil
 }
 
 func (m *MigrationExecutor) stepUpdateServices(ctx context.Context, exec *MigrationExecutor, plan *MigrationPlan) error {
-	slog.Info("Updating service endpoints")
-
-	// Update services to point to new PVCs/workloads
-	time.Sleep(1 * time.Second)
-
+	// For most apps, updating the workload (Deployment/STS) is sufficient
 	return nil
 }
 
 func (m *MigrationExecutor) stepUpdateWorkloads(ctx context.Context, exec *MigrationExecutor, plan *MigrationPlan) error {
-	slog.Info("Updating workload references")
+	slog.Info("Updating workload references", "plan", plan.ID)
 
-	// Update Deployments/StatefulSets to use new PVCs
-	time.Sleep(1 * time.Second)
+	for _, pvc := range plan.PVCs {
+		targetName := fmt.Sprintf("%s-cloned", pvc.Name)
+
+		// 1. Find workloads using this PVC
+		deployments, _ := m.sourceClient.AppsV1().Deployments(pvc.Namespace).List(ctx, metav1.ListOptions{})
+		for _, d := range deployments.Items {
+			updated := false
+			for i, v := range d.Spec.Template.Spec.Volumes {
+				if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == pvc.Name {
+					d.Spec.Template.Spec.Volumes[i].PersistentVolumeClaim.ClaimName = targetName
+					updated = true
+				}
+			}
+			if updated {
+				_, err := m.sourceClient.AppsV1().Deployments(pvc.Namespace).Update(ctx, &d, metav1.UpdateOptions{})
+				if err != nil {
+					return fmt.Errorf("failed to update deployment %s: %w", d.Name, err)
+				}
+				slog.Info("Updated deployment to use new PVC", "deployment", d.Name, "pvc", targetName)
+			}
+		}
+
+		statefulsets, _ := m.sourceClient.AppsV1().StatefulSets(pvc.Namespace).List(ctx, metav1.ListOptions{})
+		for _, s := range statefulsets.Items {
+			updated := false
+			for i, v := range s.Spec.Template.Spec.Volumes {
+				if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == pvc.Name {
+					s.Spec.Template.Spec.Volumes[i].PersistentVolumeClaim.ClaimName = targetName
+					updated = true
+				}
+			}
+			if updated {
+				_, err := m.sourceClient.AppsV1().StatefulSets(pvc.Namespace).Update(ctx, &s, metav1.UpdateOptions{})
+				if err != nil {
+					return fmt.Errorf("failed to update statefulset %s: %w", s.Name, err)
+				}
+				slog.Info("Updated statefulset to use new PVC", "statefulset", s.Name, "pvc", targetName)
+			}
+		}
+	}
 
 	return nil
 }
@@ -618,6 +750,19 @@ func (m *MigrationExecutor) calculateImpact(ctx context.Context, pvcs []types.PV
 		RiskLevel:         "low",
 		AffectedWorkloads: workloads,
 	}
+}
+
+func (m *MigrationExecutor) assessRisk(rec types.Recommendation, impact MigrationImpact) string {
+	if impact.DataTransferSize > 100*1024*1024*1024 { // > 100GB
+		return "high"
+	}
+	if len(impact.AffectedWorkloads) > 5 {
+		return "high"
+	}
+	if rec.Type == "resize" {
+		return "medium"
+	}
+	return "low"
 }
 
 // SubmitArgoWorkflow submits a migration workflow to Argo

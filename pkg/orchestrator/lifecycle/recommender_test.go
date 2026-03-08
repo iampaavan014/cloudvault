@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cloudvault-io/cloudvault/pkg/ai"
 	"github.com/cloudvault-io/cloudvault/pkg/types"
 	"github.com/cloudvault-io/cloudvault/pkg/types/apis/v1alpha1"
 )
@@ -135,6 +136,7 @@ func TestIntelligentRecommender_Recommend_ZombieVolume(t *testing.T) {
 }
 
 func TestIntelligentRecommender_Recommend_WellSized(t *testing.T) {
+	ai.StartMockAIService(t)
 	recommender := NewIntelligentRecommender(nil)
 
 	pvc := types.PVCMetric{
@@ -317,6 +319,7 @@ func TestIntelligentRecommender_Recommend_MinimumSize(t *testing.T) {
 
 func TestIntelligentRecommender_Integration(t *testing.T) {
 	// Test that all components work together
+	ai.StartMockAIService(t)
 	recommender := NewIntelligentRecommender(nil)
 
 	pvcs := []types.PVCMetric{

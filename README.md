@@ -2,7 +2,7 @@
 
 > **Multi-Cloud Kubernetes Storage Cost Intelligence Platform**
 
-CloudVault is an open-source platform designed to solve the #1 pain point in modern Kubernetes: **storage cost visibility and optimization**. It brings NetApp-caliber storage intelligence to the broader cloud-native ecosystem, helping you identify zombie volumes, over-provisioned storage, and inefficient storage classes across AWS, GCP, and Azure.
+CloudVault is an open-source platform designed to solve the #1 pain point in modern Kubernetes: **storage cost visibility and optimization**. It brings -caliber storage intelligence to the broader cloud-native ecosystem, helping you identify zombie volumes, over-provisioned storage, and inefficient storage classes across AWS, GCP, and Azure.
 
 ---
 
@@ -19,37 +19,16 @@ CloudVault is an open-source platform designed to solve the #1 pain point in mod
 
 ## 🏗️ Architecture
 
-CloudVault is designed as a **storage intelligence platform** that integrates with the Kubernetes ecosystem. It consists of two main components:
+CloudVault follows a modular, cloud-native architecture designed for scale and intelligence. For a deep dive into the system design, flow charts, and sequence diagrams, see the **[Architecture Documentation](docs/architecture.md)**.
 
-### 1. CloudVault Platform (This Project)
-- **CloudVault Agent**: Lightweight DaemonSet that collects storage metrics, cost data, and network traffic (via eBPF)
-- **CloudVault Dashboard**: React-based UI with real-time cost analytics and governance controls
-- **Policy Engine**: Enforces budget limits and lifecycle policies via Kubernetes admission controllers
-- **Migration Orchestrator**: Creates and manages storage migration workflows
+### Core Components
+- **CloudVault Agent**: Lightweight DaemonSet for eBPF-based monitoring and metric collection.
+- **Controller & Orchestrator**: The central brain managing `StorageLifecyclePolicies` and `MigrationPlans`.
+- **AI Service**: PyTorch-powered microservice for cost forecasting and placement optimization.
+- **Storage Intelligence Graph (SIG)**: Neo4j-backed relationship mapping for data gravity analysis.
+- **Migration Manager**: Orchestrates non-disruptive storage moves via Argo Workflows.
 
-### 2. Argo Workflows (External Dependency)
-- **Workflow Controller**: Executes the migration workflows created by CloudVault
-- **Orchestration Engine**: Handles retries, state management, and workflow visualization
-- **CNCF Graduated Project**: Industry-standard workflow orchestration for Kubernetes
-
-### How They Work Together
-```
-┌─────────────────────────────────────────────────────────┐
-│ CloudVault Agent                                        │
-│  ├─ Analyzes storage costs and usage patterns          │
-│  ├─ Identifies optimization opportunities               │
-│  └─ Creates Argo Workflow resources for migrations     │
-└─────────────────────────────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────────────┐
-│ Argo Workflows Controller (Optional Dependency)        │
-│  ├─ Executes migration workflows                        │
-│  ├─ Handles orchestration and error recovery           │
-│  └─ Provides workflow status and logs                   │
-└─────────────────────────────────────────────────────────┘
-```
-
-> **Note**: CloudVault **creates** migration workflows, Argo **executes** them. This separation of concerns follows cloud-native best practices and allows users to leverage existing Argo installations.
+---
 
 ---
 

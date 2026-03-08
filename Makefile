@@ -1,215 +1,128 @@
-.PHONY: all build build-agent build-cli test clean deps fmt lint run help
+# CloudVault - Multi-Cloud Kubernetes Storage Cost Intelligence
+# Standardized Makefile for CNCF-compliant projects
 
-export GOTOOLCHAIN=auto
-BINARY_AGENT=cloudvault-agent
-BINARY_CLI=cloudvault
-BUILD_DIR=bin
-GO=go
-GOFLAGS=-v
-GOTEST=go test
-GOFMT=gofmt
-GOLINT=$(BUILD_DIR)/golangci-lint
+.PHONY: all build build-agent build-cli test unittest test-coverage test-verbose fmt lint vet clean deps help release version
 
-# Build info
-VERSION?=v0.1.0-alpha
-COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
-LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildDate=$(BUILD_DATE)"
+# Project variables
+PROJECT_NAME := cloudvault
+BINARY_AGENT := cloudvault-agent
+BINARY_CLI   := cloudvault
+BUILD_DIR    := bin
+VERSION      ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0-alpha")
+COMMIT       := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE   := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
-all: deps fmt build test
+# Go variables
+GO       := go
+GOFLAGS  := -v
+LDFLAGS  := -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildDate=$(BUILD_DATE)
+GCFLAGS  := 
 
-## help: Display this help message
-help:
-	@echo "CloudVault - Multi-Cloud Kubernetes Storage Cost Intelligence"
-	@echo ""
-	@echo "Available targets:"
-	@echo "  make build        - Build all binaries"
-	@echo "  make build-web    - Build Web UI assets"
-	@echo "  make build-agent  - Build agent binary only"
-	@echo "  make build-cli    - Build CLI binary only"
-	@echo "  make test         - Run all tests"
-	@echo "  make unittest     - Run unit tests with coverage"
-	@echo "  make test-coverage - Generate HTML coverage report"
-	@echo "  make test-verbose - Run tests with verbose output"
-	@echo "  make fmt          - Format Go code"
-	@echo "  make lint         - Run linters"
-	@echo "  make clean        - Remove build artifacts"
-	@echo "  make deps         - Download dependencies"
-	@echo "  make run          - Run CLI locally"
-	@echo "  make docker       - Build Docker image"
+# Tools
+GOLINT   := $(BUILD_DIR)/golangci-lint
+GOLINT_VERSION := v1.64.8
 
-## deps: Download Go module dependencies
-deps:
-	@echo "📦 Downloading dependencies..."
-	$(GO) mod download
+# Help target - auto-documented
+help: ## Display this help message
+	@echo "CloudVault Build System"
+	@echo "-----------------------"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+all: deps fmt vet lint build test ## Build and test everything
+
+deps: ## Download and tidy dependencies
+	@echo "📦 Tidying dependencies..."
 	$(GO) mod tidy
-	@echo "✅ Dependencies ready"
+	$(GO) mod download
 
-## build: Build all binaries
-build: build-web build-agent build-cli
-	@echo "✅ Build complete!"
+fmt: ## Format Go source code
+	@echo "🎨 Formatting code..."
+	$(GO) fmt ./...
+	@echo "✅ Code formatted"
 
-## generate: Generate eBPF Go code via bpf2go
-generate:
+vet: ## Run go vet
+	@echo "🔍 Running go vet..."
+	$(GO) vet ./...
+
+lint: build-web ## Run golangci-lint
+	@echo "🔍 Running linters..."
+	@if [ ! -f $(GOLINT) ]; then \
+		echo "📦 Installing golangci-lint $(GOLINT_VERSION)..."; \
+		mkdir -p $(BUILD_DIR); \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(BUILD_DIR) $(GOLINT_VERSION); \
+	fi
+	$(GOLINT) run ./... --timeout=5m
+
+generate: ## Generate eBPF Go code via bpf2go
 	@echo "🧬 Generating eBPF code..."
 	@if command -v clang >/dev/null 2>&1 && command -v llvm-strip >/dev/null 2>&1; then \
 		$(GO) generate ./...; \
 		echo "✅ eBPF code generated"; \
 	else \
 		echo "⚠️  Warning: clang or llvm-strip not found. eBPF generation skipped."; \
-		echo "   (This is OK if you are using pre-built Docker images or mocks)"; \
-		echo "   (Install with: sudo apt install clang llvm)"; \
 	fi
 
-## build-web: Build the CloudVault Web UI
-build-web:
+build: build-agent build-cli ## Build all binaries
+
+build-agent: generate ## Build cloudvault-agent
+	@echo "🔨 Building $(BINARY_AGENT)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_AGENT) cmd/agent/main.go
+
+build-cli: build-web generate ## Build cloudvault (CLI)
+	@echo "🔨 Building $(BINARY_CLI)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_CLI) cmd/cli/main.go
+
+build-web: ## Build Web UI assets
 	@echo "🎨 Building Web UI..."
 	cd web && npm install && npm run build
-	@echo "📦 Copying web assets..."
 	@mkdir -p pkg/dashboard
 	@rm -rf pkg/dashboard/dist
 	@cp -r web/dist pkg/dashboard/
-	@echo "✅ Web UI built and assets copied."
+	@echo "✅ Web UI built and assets synced"
 
-## build-agent: Build the CloudVault agent
-build-agent: generate
-	@echo "🔨 Building $(BINARY_AGENT)..."
-	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_AGENT) cmd/agent/main.go
-	@echo "✅ Agent built: $(BUILD_DIR)/$(BINARY_AGENT)"
+test: build-web ## Run all tests with race detection
+	@echo "🧪 Running full test suite..."
+	$(GO) test -v -race -cover ./...
 
-## build-cli: Build the CloudVault CLI
-build-cli: build-web generate
-	@echo "🔨 Building $(BINARY_CLI)..."
-	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_CLI) cmd/cli/main.go
-	@echo "✅ CLI built: $(BUILD_DIR)/$(BINARY_CLI)"
-
-## test: Run all tests
-test: build-web
-	@echo "🧪 Running tests..."
-	$(GOTEST) -v -race -coverprofile=coverage.txt -covermode=atomic ./...
-	@echo "✅ Tests complete"
-
-## unittest: Run unit tests with coverage report
-unittest: build-web
+unittest: ## Run unit tests with coverage
 	@echo "🧪 Running unit tests..."
-	@$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic ./...
-	@echo ""
-	@echo "📊 Coverage Summary:"
-	@go tool cover -func=coverage.out | grep total | awk '{print "Total Coverage: " $$3}'
-	@echo "✅ Unit tests complete"
+	$(GO) test -v -short -coverprofile=coverage.out ./...
+	@$(GO) tool cover -func=coverage.out | grep total | awk '{print "Total Coverage: " $$3}'
 
-## test-coverage: Generate HTML coverage report
-test-coverage: unittest
-	@echo "📊 Generating HTML coverage report..."
-	@go tool cover -html=coverage.out -o coverage.html
-	@echo "✅ Coverage report generated: coverage.html"
-	@echo "💡 Open with: open coverage.html"
+test-coverage: unittest ## Open coverage report in browser
+	$(GO) tool cover -html=coverage.out -o coverage.html
+	@echo "📊 Report generated: coverage.html"
 
-## test-verbose: Run tests with verbose output
-test-verbose:
-	@echo "🧪 Running tests (verbose)..."
-	@$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic ./... -count=1
-	@echo "✅ Tests complete"
-
-## fmt: Format Go code
-fmt:
-	@echo "🎨 Formatting code..."
-	$(GOFMT) -s -w .
-	@echo "✅ Code formatted"
-
-## lint: Run linters (requires golangci-lint)
-lint: build-web
-	@echo "🔍 Running linters..."
-	@if [ ! -f $(GOLINT) ]; then \
-		echo "📦 golangci-lint not found. Installing into $(BUILD_DIR)..."; \
-		mkdir -p $(BUILD_DIR); \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(BUILD_DIR) v1.64.8; \
-	fi
-	$(GOLINT) run ./...
-	@echo "✅ Linting complete"
-
-## clean: Remove build artifacts
-clean:
-	@echo "🧹 Cleaning..."
+clean: ## Remove build artifacts
+	@echo "🧹 Cleaning up..."
 	@rm -rf $(BUILD_DIR)
-	@rm -f coverage.txt coverage.out coverage.html
+	@rm -f coverage.out coverage.html coverage.txt
 	@rm -rf pkg/dashboard/dist
 	@rm -rf web/dist
-	@echo "✅ Clean complete"
+	@echo "✅ Cleaned"
 
-## run: Run the CLI locally
-run: build-cli
-	@echo "🚀 Running CloudVault CLI..."
-	./$(BUILD_DIR)/$(BINARY_CLI) cost --kubeconfig ~/.kube/config
-
-## run-agent: Run the agent locally
-run-agent: build-agent
-	@echo "🚀 Running CloudVault Agent..."
-	./$(BUILD_DIR)/$(BINARY_AGENT) --kubeconfig ~/.kube/config --interval 1m
-
-## docker: Build Docker images
-docker:
+docker: ## Build Docker images
 	@echo "🐳 Building Docker images..."
 	docker build -t cloudvault/agent:$(VERSION) -f deploy/Dockerfile .
-	docker build -t cloudvault/agent:latest -f deploy/Dockerfile .
 	docker build -t cloudvault/ai:$(VERSION) -f deploy/Dockerfile.ai .
-	docker build -t cloudvault/ai:latest -f deploy/Dockerfile.ai .
 	@echo "✅ Docker images built"
 
-## cluster-clean: Remove all Helm-managed CloudVault resources from the cluster
-cluster-clean:
-	@echo "🧹 Removing CloudVault Helm release..."
-	-helm uninstall cloudvault -n cloudvault 2>/dev/null || true
-	@echo "✅ Cluster cleaned"
-
-## production-deploy: Build images and deploy via Helm (single command)
-production-deploy: build docker
-	@echo "☸️  Deploying CloudVault to cluster via Helm..."
-	@# Load images into kind cluster (no registry required)
-	-kind load docker-image cloudvault/agent:latest --name cloudvault-test
-	-kind load docker-image cloudvault/ai:latest --name cloudvault-test
-	@echo "📦 Running Helm upgrade --install..."
-	helm upgrade --install cloudvault ./deploy/charts/cloudvault \
-		--namespace cloudvault \
-		--create-namespace \
-		--set image.repository=cloudvault/agent \
-		--set image.tag=latest \
-		--set ai.repository=cloudvault/ai \
-		--set ai.tag=latest \
-		--atomic \
-		--timeout 5m
-	@echo ""
-	@echo "✅ Production deployment complete!"
-	@echo "💡 Access dashboard: kubectl port-forward svc/cloudvault-dashboard 8080:8080 -n cloudvault"
-	@echo "💡 Access AI svc:    kubectl port-forward svc/cloudvault-ai 5005:5005 -n cloudvault"
-
-## install: Install CLI to /usr/local/bin
-install: build-cli
-	@echo "📦 Installing CloudVault CLI..."
-	sudo cp $(BUILD_DIR)/$(BINARY_CLI) /usr/local/bin/
-	@echo "✅ Installed to /usr/local/bin/$(BINARY_CLI)"
-
-## dev-deps: Install development dependencies
-dev-deps:
-	@echo "📦 Installing development dependencies..."
-	@mkdir -p $(BUILD_DIR)
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(BUILD_DIR) v1.64.8
-	@echo "✅ Development dependencies installed"
-
-## release: Create a release build (Linux, macOS, Windows)
-release:
+release: build-web ## Create multi-platform release binaries
 	@echo "📦 Building release binaries..."
 	@mkdir -p $(BUILD_DIR)/release
-	GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/release/$(BINARY_CLI)-linux-amd64 cmd/cli/main.go
-	GOOS=darwin GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/release/$(BINARY_CLI)-darwin-amd64 cmd/cli/main.go
-	GOOS=darwin GOARCH=arm64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/release/$(BINARY_CLI)-darwin-arm64 cmd/cli/main.go
-	GOOS=windows GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/release/$(BINARY_CLI)-windows-amd64.exe cmd/cli/main.go
-	@echo "✅ Release binaries built in $(BUILD_DIR)/release/"
+	@for os in linux darwin; do \
+		for arch in amd64 arm64; do \
+			echo "  - $$os/$$arch"; \
+			GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS) -s -w" -o $(BUILD_DIR)/release/$(BINARY_CLI)-$$os-$$arch cmd/cli/main.go; \
+		done; \
+	done
+	@echo "  - windows/amd64"; \
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS) -s -w" -o $(BUILD_DIR)/release/$(BINARY_CLI)-windows-amd64.exe cmd/cli/main.go
+	@echo "✅ Release binaries ready in $(BUILD_DIR)/release/"
 
-## version: Show version information
-version:
+version: ## Show version info
 	@echo "CloudVault $(VERSION)"
 	@echo "Commit: $(COMMIT)"
-	@echo "Built:  $(BUILD_DATE)"
+	@echo "Date:   $(BUILD_DATE)"
