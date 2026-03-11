@@ -140,6 +140,20 @@ func (m *MigrationExecutor) CreateMigrationPlan(ctx context.Context, rec types.R
 func (m *MigrationExecutor) ExecuteMigration(ctx context.Context, plan *MigrationPlan) error {
 	slog.Info("Starting migration execution", "id", plan.ID, "name", plan.Name)
 
+	if m.sourceClient == nil || m.dynamicClient == nil {
+		slog.Warn("Migration executor has no Kubernetes clients — skipping execution", "id", plan.ID)
+		status := &MigrationStatus{
+			Plan:      plan,
+			State:     "skipped",
+			Progress:  0,
+			StartedAt: time.Now(),
+		}
+		now := time.Now()
+		status.CompletedAt = &now
+		m.migrations[plan.ID] = status
+		return nil
+	}
+
 	status := &MigrationStatus{
 		Plan:      plan,
 		State:     "pending",
@@ -224,7 +238,10 @@ func (m *MigrationExecutor) buildMigrationSteps(plan *MigrationPlan) []migration
 
 func (m *MigrationExecutor) stepPreFlightCheck(ctx context.Context, exec *MigrationExecutor, plan *MigrationPlan) error {
 	slog.Info("Running pre-flight checks")
-
+	if m.sourceClient == nil {
+		slog.Warn("Pre-flight check skipped: no Kubernetes client available")
+		return nil
+	}
 	// Check if PVCs exist
 	for _, pvc := range plan.PVCs {
 		_, err := m.sourceClient.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(ctx, pvc.Name, metav1.GetOptions{})

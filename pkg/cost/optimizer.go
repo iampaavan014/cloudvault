@@ -158,7 +158,6 @@ func (o *Optimizer) checkZombieVolume(m *types.PVCMetric) *types.Recommendation 
 func (o *Optimizer) checkStorageClassOptimization(m *types.PVCMetric, provider string) *types.Recommendation {
 	_ = o.calculator.CalculatePVCCost(m, provider)
 	totalIOPS := m.TotalIOPS()
-
 	var targetClass string
 	var reasoning string
 
@@ -168,7 +167,6 @@ func (o *Optimizer) checkStorageClassOptimization(m *types.PVCMetric, provider s
 		if len(sc) > 4 && sc[:4] == "aws-" {
 			sc = sc[4:]
 		}
-		// AWS optimization logic
 		switch sc {
 		case "gp3", "gp2":
 			if totalIOPS < 500 {
@@ -185,12 +183,10 @@ func (o *Optimizer) checkStorageClassOptimization(m *types.PVCMetric, provider s
 			}
 		}
 	}
-
 	if (provider == "gcp" && targetClass == "") || (provider == "unknown" && (len(sc) > 4 && sc[:4] == "gcp-")) {
 		if len(sc) > 4 && sc[:4] == "gcp-" {
 			sc = sc[4:]
 		}
-		// GCP optimization logic
 		switch sc {
 		case "pd-ssd", "ssd":
 			if totalIOPS < 1000 {
@@ -204,23 +200,66 @@ func (o *Optimizer) checkStorageClassOptimization(m *types.PVCMetric, provider s
 			}
 		}
 	}
-
 	if (provider == "azure" && targetClass == "") || (provider == "unknown" && (len(sc) > 6 && sc[:6] == "azure-")) {
 		if len(sc) > 6 && sc[:6] == "azure-" {
 			sc = sc[6:]
 		}
-		// Azure optimization logic
-		if sc == "premium" || sc == "managed-premium" {
+		// Normalize Kubernetes-style Azure storage class names to their pricing equivalents
+		normalizedSC := sc
+		switch sc {
+		case "managed-premium", "premium":
+			normalizedSC = "Premium_LRS"
+		case "managed-standard-ssd", "standard-ssd":
+			normalizedSC = "StandardSSD_LRS"
+		case "managed", "standard":
+			normalizedSC = "Standard_LRS"
+		}
+
+		// recommendedKubeClass is the user-facing Kubernetes class name
+		// recommendedPricingClass is the name understood by StaticPricingProvider
+		var recommendedKubeClass, recommendedPricingClass string
+		switch normalizedSC {
+		case "Premium_LRS":
 			if totalIOPS < 1000 {
-				targetClass = "standard"
-				reasoning = fmt.Sprintf("Low IOPS usage (%.0f). Standard storage is 62%% cheaper.", totalIOPS)
+				recommendedKubeClass = "standard"
+				recommendedPricingClass = "StandardSSD_LRS"
+				reasoning = fmt.Sprintf("Low IOPS usage (%.0f). Standard SSD storage is 62%% cheaper.", totalIOPS)
 			}
+		case "StandardSSD_LRS":
+			if totalIOPS < 300 {
+				recommendedKubeClass = "standard-hdd"
+				recommendedPricingClass = "Standard_LRS"
+				reasoning = fmt.Sprintf("Very low IOPS usage (%.0f). Standard HDD storage is 50%% cheaper.", totalIOPS)
+			}
+		}
+
+		if recommendedKubeClass != "" {
+			origSC := m.StorageClass
+			m.StorageClass = normalizedSC
+			effectiveProvider := provider
+			if effectiveProvider == "unknown" {
+				effectiveProvider = "azure"
+			}
+			savings := o.calculator.EstimateSavings(m, effectiveProvider, recommendedPricingClass)
+			m.StorageClass = origSC
+			if savings > 0.50 {
+				return &types.Recommendation{
+					Type:             "storage_class",
+					PVC:              m.Name,
+					Namespace:        m.Namespace,
+					CurrentState:     m.StorageClass,
+					RecommendedState: recommendedKubeClass,
+					MonthlySavings:   savings,
+					Reasoning:        reasoning,
+					Impact:           determineImpact(totalIOPS, recommendedKubeClass),
+				}
+			}
+			return nil
 		}
 	}
 
-	// Calculate savings if we found a target
+	// Calculate savings if we found a target (AWS / GCP path)
 	if targetClass != "" {
-		// Use inferred provider if unknown
 		effectiveProvider := provider
 		if effectiveProvider == "unknown" {
 			if len(m.StorageClass) > 4 && m.StorageClass[:4] == "aws-" {
@@ -231,9 +270,8 @@ func (o *Optimizer) checkStorageClassOptimization(m *types.PVCMetric, provider s
 				effectiveProvider = "azure"
 			}
 		}
-
 		savings := o.calculator.EstimateSavings(m, effectiveProvider, targetClass)
-		if savings > 0.50 { // Only recommend if saving > $0.50/month
+		if savings > 0.50 {
 			return &types.Recommendation{
 				Type:             "storage_class",
 				PVC:              m.Name,
@@ -246,7 +284,6 @@ func (o *Optimizer) checkStorageClassOptimization(m *types.PVCMetric, provider s
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -296,32 +333,28 @@ func (o *Optimizer) checkCrossCloudMigration(m *types.PVCMetric) *types.Recommen
 func (o *Optimizer) checkOversizedVolume(m *types.PVCMetric) *types.Recommendation {
 	// Can only check if we have usage data
 	if m.UsedBytes == 0 {
-		return nil // No usage data available
+		return nil
 	}
-
 	utilizationPercent := m.UsagePercent()
 
-	// If using less than 20% of allocated space for volumes > 1GB
-	// Skip if already migrated by CloudVault or already at minimum 1GB
+	// Skip already-migrated volumes
 	if m.Annotations != nil && m.Annotations["cloudvault.io/migrated-from"] != "" {
 		return nil
 	}
 
-	if utilizationPercent < 20 && m.SizeGB() > 1.1 { // Allow some slack for 1Gi volumes
+	// Only recommend resize for volumes >= 50GB to avoid noise on tiny volumes
+	if utilizationPercent < 20 && m.SizeGB() >= 50 {
 		recommendedSizeGB := m.UsedGB() * 1.5 // 50% buffer
 		if recommendedSizeGB < 1 {
-			recommendedSizeGB = 1 // Minimum 1GB
+			recommendedSizeGB = 1
 		}
-
 		// Don't recommend if the savings are negligible (less than 10% reduction)
 		if recommendedSizeGB >= m.SizeGB()*0.9 {
 			return nil
 		}
-
 		currentCost := m.MonthlyCost
 		estimatedNewCost := currentCost * (recommendedSizeGB / m.SizeGB())
 		savings := currentCost - estimatedNewCost
-
 		return &types.Recommendation{
 			Type:             "resize",
 			PVC:              m.Name,
@@ -333,7 +366,6 @@ func (o *Optimizer) checkOversizedVolume(m *types.PVCMetric) *types.Recommendati
 			Impact:           "medium",
 		}
 	}
-
 	return nil
 }
 
