@@ -1,6 +1,7 @@
 package cost
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -184,7 +185,7 @@ func TestLivePricingProvider_GetEgressPrice_SameRegion(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetEgressPrice(nil, "aws", "us-east-1", "aws", "us-east-1")
+	price, err := p.GetEgressPrice(context.TODO(), "aws", "us-east-1", "aws", "us-east-1")
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, price)
 }
@@ -194,12 +195,12 @@ func TestLivePricingProvider_GetEgressPrice_IntraCloud(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetEgressPrice(nil, "aws", "us-east-1", "aws", "us-west-2")
+	price, err := p.GetEgressPrice(context.TODO(), "aws", "us-east-1", "aws", "us-west-2")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.01, price, 0.0001)
 
 	// cache hit
-	price2, err := p.GetEgressPrice(nil, "aws", "us-east-1", "aws", "us-west-2")
+	price2, err := p.GetEgressPrice(context.TODO(), "aws", "us-east-1", "aws", "us-west-2")
 	require.NoError(t, err)
 	assert.InDelta(t, price, price2, 0.0001)
 }
@@ -209,12 +210,12 @@ func TestLivePricingProvider_GetEgressPrice_CrossCloud(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetEgressPrice(nil, "aws", "us-east-1", "gcp", "us-central1")
+	price, err := p.GetEgressPrice(context.TODO(), "aws", "us-east-1", "gcp", "us-central1")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.09, price, 0.0001)
 
 	// cache hit
-	price2, err := p.GetEgressPrice(nil, "aws", "us-east-1", "gcp", "us-central1")
+	price2, err := p.GetEgressPrice(context.TODO(), "aws", "us-east-1", "gcp", "us-central1")
 	require.NoError(t, err)
 	assert.Equal(t, price, price2)
 }
@@ -224,7 +225,7 @@ func TestLivePricingProvider_GetEgressPrice_GCPIntra(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetEgressPrice(nil, "gcp", "us-central1", "gcp", "europe-west1")
+	price, err := p.GetEgressPrice(context.TODO(), "gcp", "us-central1", "gcp", "europe-west1")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.01, price, 0.0001)
 }
@@ -234,7 +235,7 @@ func TestLivePricingProvider_GetEgressPrice_AzureIntra(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetEgressPrice(nil, "azure", "eastus", "azure", "westus")
+	price, err := p.GetEgressPrice(context.TODO(), "azure", "eastus", "azure", "westus")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.02, price, 0.0001)
 }
@@ -244,12 +245,12 @@ func TestLivePricingProvider_GetPrice_StaticFallback(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetPrice(nil, "aws", "gp3", "us-east-1")
+	price, err := p.GetPrice(context.TODO(), "aws", "gp3", "us-east-1")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.08, price, 0.0001)
 
 	// cache hit
-	price2, err := p.GetPrice(nil, "aws", "gp3", "us-east-1")
+	price2, err := p.GetPrice(context.TODO(), "aws", "gp3", "us-east-1")
 	require.NoError(t, err)
 	assert.InDelta(t, price, price2, 0.0001)
 }
@@ -259,7 +260,7 @@ func TestLivePricingProvider_GetPrice_GCP_Fallback(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetPrice(nil, "gcp", "pd-standard", "us-central1")
+	price, err := p.GetPrice(context.TODO(), "gcp", "pd-standard", "us-central1")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.04, price, 0.0001)
 }
@@ -269,7 +270,7 @@ func TestLivePricingProvider_GetPrice_Azure_Fallback(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetPrice(nil, "azure", "Premium_LRS", "eastus")
+	price, err := p.GetPrice(context.TODO(), "azure", "Premium_LRS", "eastus")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.12, price, 0.0001)
 }
@@ -279,7 +280,7 @@ func TestLivePricingProvider_GetPrice_UnknownProvider(t *testing.T) {
 		cache:          NewPricingCache(time.Hour),
 		staticFallback: NewStaticPricingProvider(),
 	}
-	price, err := p.GetPrice(nil, "unknown-cloud", "gp3", "us-east-1")
+	price, err := p.GetPrice(context.TODO(), "unknown-cloud", "gp3", "us-east-1")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.10, price, 0.0001)
 }
